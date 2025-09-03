@@ -1,0 +1,32 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "b27fdce170227e5caef3d04f1e6f10ab"
+name = "br-dj"
+handle = "br-dj"
+application_url = "https://functioning-beginners-mil-hiv.trycloudflare.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2025-07"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products"
+
+[auth]
+redirect_urls = ["https://functioning-beginners-mil-hiv.trycloudflare.com/auth/callback", "https://functioning-beginners-mil-hiv.trycloudflare.com/auth/shopify/callback", "https://functioning-beginners-mil-hiv.trycloudflare.com/api/auth/callback"]
+
+[pos]
+embedded = false
