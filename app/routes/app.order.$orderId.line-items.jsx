@@ -1,4 +1,4 @@
-import { useLoaderData, useParams } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
 import { json } from "@remix-run/node";
 import {
   Page,
@@ -14,15 +14,16 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 
-import { 
-  getOrderById, 
-  getOrderLineItemsByOrderId, 
-  getOrderLineItemStats,
-  getOrderWithLineItems 
-} from "../actions/index.js";
-
 export const loader = async ({ request, params }) => {
   await authenticate.admin(request);
+  
+  // Import server-only actions inside the loader
+  const { 
+    getOrderById, 
+    getOrderLineItemsByOrderId, 
+    getOrderLineItemStats,
+    getOrderWithLineItems 
+  } = await import("../actions/index.server.js");
 
   const orderId = params.orderId;
   

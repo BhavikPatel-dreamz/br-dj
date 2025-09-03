@@ -16,7 +16,7 @@ import {
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 
-import { getOrders, getOrdersCount } from "../actions/fhr-orders.js";
+import { getOrders, getOrdersCount } from "../actions/fhr-orders.server.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);

@@ -19,7 +19,7 @@ import {
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import { getMonthlyOrderProductsByCategory } from "../actions/fhr-orders.js";
+import { getMonthlyOrderProductsByCategory } from "../actions/fhr-orders.server.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);

@@ -1,6 +1,6 @@
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import { getMonthlyOrderProducts } from "../actions/fhr-orders.js";
+import { getMonthlyOrderProducts } from "../actions/fhr-orders.server.js";
 
 /**
  * Public API Route for Monthly Order Products

@@ -18,7 +18,7 @@ import {
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import { getMonthlyOrderProducts } from "../actions/fhr-orders.js";
+import { getMonthlyOrderProducts } from "../actions/fhr-orders.server.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);

@@ -12,8 +12,10 @@ export {
   getOrdersByCompanyId,
   getOrdersByFinancialStatus,
   getOrdersByFulfillmentStatus,
-  getOrderByOrderNumber
-} from './fhr-orders.js';
+  getMonthlyOrderProductsByCategory,
+  getOrderByOrderNumber,
+  getMonthlyOrderProducts
+} from './fhr-orders.server.js';
 
 // FHR Order Line Items Actions
 export {
@@ -28,7 +30,7 @@ export {
   getOrderLineItemsCount,
   getOrderWithLineItems,
   getOrderLineItemStats
-} from './fhr-order-line-items.js';
+} from './fhr-order-line-items.server.js';
 
 // FHR Products Actions
 export {
@@ -45,4 +47,4 @@ export {
   getLowInventoryProducts,
   getUniqueVendors,
   getUniqueProductTypes
-} from './fhr-products.js';
+} from './fhr-products.server.js';

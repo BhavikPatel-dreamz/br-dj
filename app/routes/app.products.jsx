@@ -25,7 +25,7 @@ import {
   getUniqueVendors,
   getUniqueProductTypes,
   getProductInventoryStats
-} from "../actions/fhr-products.js";
+} from "../actions/fhr-products.server.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
