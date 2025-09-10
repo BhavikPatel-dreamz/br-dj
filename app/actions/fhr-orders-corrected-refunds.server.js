@@ -296,6 +296,10 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       ORDER BY category_name, net_quantity DESC, net_value DESC
     `;
 
+
+  
+
+
     // Summary query for categories
     const summaryQuery = `
       WITH OrderStats AS (
@@ -335,6 +339,11 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       mssql.query(query, params),
       mssql.query(summaryQuery, params)
     ]);
+
+
+      console.log("-------------------",productResults)
+      console.log("-------------------",summaryResult)
+
 
     // Group products by category
     const categorizedData = {};
