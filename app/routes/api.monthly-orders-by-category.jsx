@@ -1,14 +1,15 @@
 import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
-import { getMonthlyOrderProductsByCategory } from "../actions/fhr-orders.server.js";
+import { getMonthlyOrderProductsByCategoryWithRefunds as getMonthlyOrderProductsByCategory } from "../actions/fhr-orders-corrected-refunds.server.js";
 import { 
   validateShopifyProxyRequest, 
   createSecureProxyResponse 
 } from "../utils/shopify-security.server.js";
 
 /**
- * Secure API Route for Monthly Order Products by Category
+ * Secure API Route for Monthly Order Products by Category (with Refunds)
  * Supports both authenticated Shopify users and secure proxy access
+ * Returns net quantities and values after subtracting refunds
  * GET /api/monthly-orders-by-category
  * 
  * Query Parameters:
@@ -19,6 +20,10 @@ import {
  * - year: Year (YYYY, defaults to current year)
  * - signature: HMAC signature for proxy requests (optional for enhanced security)
  * - secure: Set to 'true' to require signature validation
+ * 
+ * Response includes:
+ * - categories: Array of product categories with net quantities/values
+ * - summary: Total orders, refund metrics, net values
  */
 export const loader = async ({ request }) => {
   try {
@@ -143,7 +148,7 @@ export const loader = async ({ request }) => {
     filters.month = searchMonth;
     filters.year = searchYear;
 
-    // Get monthly order products grouped by category
+    // Get monthly order products grouped by category (with refunds accounted for)
     const result = await getMonthlyOrderProductsByCategory(filters);
 
     const responseData = {
@@ -153,8 +158,12 @@ export const loader = async ({ request }) => {
         categories: result.categories || [],
         summary: {
           totalOrders: result.totalOrders || 0,
+          ordersWithRefunds: result.ordersWithRefunds || 0,
           totalCategories: result.totalCategories || 0,
-          totalValue: result.totalValue || 0,
+          grossValue: result.grossValue || 0,
+          refundedValue: result.refundedValue || 0,
+          totalValue: result.totalValue || 0, // Net value after refunds
+          refundRate: result.refundRate || 0,
           month: searchMonth,
           year: searchYear,
           isAuthenticated: isAuthenticated,
@@ -170,7 +179,8 @@ export const loader = async ({ request }) => {
             locationId: locationId || null,
             companyLocationId: companyLocationId || null
           },
-          secureMode: requireSecureAuth
+          secureMode: requireSecureAuth,
+          refundAware: true // Indicates this response includes refund calculations
         }
       }
     };
@@ -188,7 +198,7 @@ export const loader = async ({ request }) => {
     
     const errorResponse = {
       success: false,
-      error: "Failed to fetch monthly order data by category. Please try again.",
+      error: "Failed to fetch monthly order data by category with refunds. Please try again.",
       data: null,
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     };

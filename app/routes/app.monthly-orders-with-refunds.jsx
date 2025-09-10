@@ -15,12 +15,11 @@ import {
   Select,
   Badge,
   Box,
-  Divider,
   Tooltip,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import { getMonthlyOrderProductsByCategoryWithRefunds as getMonthlyOrderProductsByCategory } from "../actions/fhr-orders-corrected-refunds.server.js";
+import { getMonthlyOrderProductsWithRefunds } from "../actions/fhr-orders-with-refunds.server.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
@@ -32,11 +31,11 @@ export const loader = async ({ request }) => {
   const month = url.searchParams.get("month")?.trim() || "";
   const year = url.searchParams.get("year")?.trim() || "";
 
-  let categorizedData = [];
+  let productSummary = [];
   let error = null;
   let totalOrders = 0;
   let ordersWithRefunds = 0;
-  let totalCategories = 0;
+  let totalProducts = 0;
   let grossValue = 0;
   let refundedValue = 0;
   let totalValue = 0;
@@ -59,12 +58,12 @@ export const loader = async ({ request }) => {
       filters.month = searchMonth;
       filters.year = searchYear;
 
-      // Get monthly order products grouped by category (with refunds accounted for)
-      const result = await getMonthlyOrderProductsByCategory(filters);
-      categorizedData = result.categories || [];
+      // Get monthly order products summary with refunds
+      const result = await getMonthlyOrderProductsWithRefunds(filters);
+      productSummary = result.products || [];
       totalOrders = result.totalOrders || 0;
       ordersWithRefunds = result.ordersWithRefunds || 0;
-      totalCategories = result.totalCategories || 0;
+      totalProducts = result.totalProducts || 0;
       grossValue = result.grossValue || 0;
       refundedValue = result.refundedValue || 0;
       totalValue = result.totalValue || 0;
@@ -72,17 +71,17 @@ export const loader = async ({ request }) => {
 
     } catch (err) {
       console.error("Database query error:", err);
-      error = "Failed to fetch monthly order data by category. Please try again.";
+      error = "Failed to fetch monthly order data. Please try again.";
     }
   }
 
   return json({ 
     filters: { customerId, location, companyLocationId, month: searchMonth, year: searchYear }, 
-    categorizedData,
+    productSummary,
     error,
     totalOrders,
     ordersWithRefunds,
-    totalCategories,
+    totalProducts,
     grossValue,
     refundedValue,
     totalValue,
@@ -90,14 +89,14 @@ export const loader = async ({ request }) => {
   });
 };
 
-export default function MonthlyOrdersByCategory() {
+export default function MonthlyOrdersWithRefunds() {
   const { 
     filters, 
-    categorizedData, 
+    productSummary, 
     error, 
     totalOrders, 
     ordersWithRefunds,
-    totalCategories, 
+    totalProducts, 
     grossValue,
     refundedValue,
     totalValue,
@@ -176,18 +175,32 @@ export default function MonthlyOrdersByCategory() {
 
   const isSearching = navigation.state === "loading";
 
+  // Prepare data table rows for products with refund information
+  const rows = (productSummary || []).map((product, index) => [
+    String(index + 1),
+    product.product_name || "Unknown Product",
+    product.sku || "N/A",
+    product.vendor || "N/A",
+    product.product_type || "N/A",
+    String(product.net_quantity || 0),
+    `$${(product.net_value || 0).toFixed(2)}`,
+    `$${(product.average_price || 0).toFixed(2)}`,
+    String(product.order_count || 0),
+    product.refunded_quantity > 0 ? `${product.refunded_quantity} refunded` : "No refunds",
+  ]);
+
   // Get selected month name
   const selectedMonthName = monthOptions.find(m => m.value === month)?.label || month;
 
   return (
     <Page>
-      <TitleBar title="Monthly Orders by Category (with Refunds)" />
+      <TitleBar title="Monthly Order Analysis (with Refunds)" />
       <Layout>
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
               <Text as="h2" variant="headingMd">
-                Monthly Product Analysis Grouped by Category (Net of Refunds)
+                Monthly Product Summary by Customer & Location (Net of Refunds)
               </Text>
               <form onSubmit={handleSubmit}>
                 <BlockStack gap="400">
@@ -252,7 +265,7 @@ export default function MonthlyOrdersByCategory() {
                       loading={isSearching}
                       disabled={!customerId && !location && !companyLocationId}
                     >
-                      {isSearching ? "Analyzing..." : "Get Category Summary"}
+                      {isSearching ? "Analyzing..." : "Get Monthly Summary"}
                     </Button>
                     <Button onClick={handleClear} disabled={isSearching}>
                       Clear Filters
@@ -265,9 +278,9 @@ export default function MonthlyOrdersByCategory() {
         </Layout.Section>
 
         {/* Enhanced Summary Cards with Refund Information */}
-        {!isSearching && categorizedData && categorizedData.length > 0 && (
+        {!isSearching && productSummary && productSummary.length > 0 && (
           <Layout.Section>
-            <InlineStack gap="400" align="start">
+            <InlineStack gap="400" align="start" wrap={false}>
               <Card>
                 <Box padding="400">
                   <BlockStack gap="200">
@@ -295,13 +308,13 @@ export default function MonthlyOrdersByCategory() {
                 <Box padding="400">
                   <BlockStack gap="200">
                     <Text as="h3" variant="headingMd" color="success">
-                      Product Categories
+                      Unique Products
                     </Text>
                     <Text as="p" variant="bodyLg" fontWeight="bold">
-                      {totalCategories}
+                      {totalProducts}
                     </Text>
                     <Badge tone="success">
-                      Categories
+                      Different SKUs
                     </Badge>
                   </BlockStack>
                 </Box>
@@ -337,9 +350,9 @@ export default function MonthlyOrdersByCategory() {
           <Card>
             <BlockStack gap="400">
               <Text as="h2" variant="headingMd">
-                Products by Category (Net of Refunds)
-                {categorizedData && categorizedData.length > 0 && 
-                  ` - ${selectedMonthName} ${year}`
+                Product Summary (Net of Refunds)
+                {productSummary && productSummary.length > 0 && 
+                  ` - ${selectedMonthName} ${year} (${productSummary.length} products)`
                 }
               </Text>
               
@@ -352,74 +365,49 @@ export default function MonthlyOrdersByCategory() {
               {isSearching && (
                 <div style={{ textAlign: "center", padding: "20px" }}>
                   <Spinner size="small" />
-                  <Text as="p">Analyzing orders by category...</Text>
+                  <Text as="p">Analyzing monthly orders...</Text>
                 </div>
               )}
               
-              {!isSearching && categorizedData && categorizedData.length === 0 && (customerId || location || companyLocationId) && (
+              {!isSearching && productSummary && productSummary.length === 0 && (customerId || location || companyLocationId) && (
                 <Text as="p" color="subdued">
-                  No orders found for {selectedMonthName} {year} matching your criteria.
+                  No net orders found for {selectedMonthName} {year} matching your criteria (all orders may have been fully refunded).
                 </Text>
               )}
               
-              {!isSearching && categorizedData && categorizedData.length > 0 && (
-                <BlockStack gap="500">
-                  {categorizedData.map((category, categoryIndex) => (
-                    <div key={categoryIndex}>
-                      <Card>
-                        <Box padding="400">
-                          <BlockStack gap="400">
-                            <InlineStack gap="300" align="space-between">
-                              <Text as="h3" variant="headingLg">
-                                {category.category_name || "Uncategorized"}
-                              </Text>
-                              <InlineStack gap="200">
-                                <Badge tone="info">
-                                  {category.products.length} products
-                                </Badge>
-                                <Badge tone="success">
-                                  {category.total_quantity} items
-                                </Badge>
-                                <Badge tone="warning">
-                                  ${category.total_value.toFixed(2)}
-                                </Badge>
-                              </InlineStack>
-                            </InlineStack>
-                            
-                            <DataTable
-                              columnContentTypes={["text", "text", "text", "numeric", "numeric", "numeric", "numeric"]}
-                              headings={[
-                                "Product Name", 
-                                "SKU", 
-                                "Vendor", 
-                                "Quantity", 
-                                "Total Price", 
-                                "Avg Price", 
-                                "Orders"
-                              ]}
-                              rows={category.products.map((product) => [
-                                product.product_name || "Unknown Product",
-                                product.sku || "N/A",
-                                product.vendor || "N/A",
-                                String(product.total_quantity || 0),
-                                `$${(product.total_price || 0).toFixed(2)}`,
-                                `$${(product.average_price || 0).toFixed(2)}`,
-                                String(product.order_count || 0),
-                              ])}
-                            />
-                          </BlockStack>
-                        </Box>
-                      </Card>
-                      {categoryIndex < categorizedData.length - 1 && <Divider />}
-                    </div>
-                  ))}
-                </BlockStack>
+              {!isSearching && productSummary && productSummary.length > 0 && (
+                <DataTable
+                  columnContentTypes={["text", "text", "text", "text", "text", "numeric", "numeric", "numeric", "numeric", "text"]}
+                  headings={[
+                    "#", 
+                    "Product Name", 
+                    "SKU", 
+                    "Vendor", 
+                    "Type", 
+                    "Net Qty", 
+                    "Net Value", 
+                    "Avg Price", 
+                    "Orders",
+                    "Refund Status"
+                  ]}
+                  rows={rows}
+                />
               )}
               
               {!customerId && !location && !companyLocationId && (
                 <Text as="p" color="subdued">
-                  Enter at least one search criterion (Customer ID, Location ID, or Company Location ID) to analyze monthly orders by category.
+                  Enter at least one search criterion (Customer ID, Location ID, or Company Location ID) to analyze monthly orders.
                 </Text>
+              )}
+              
+              {refundedValue > 0 && (
+                <Box padding="400" background="bg-surface-caution">
+                  <Text as="p" variant="bodyMd" color="subdued">
+                    💡 <strong>Note:</strong> This report shows net quantities and values after subtracting refunds. 
+                    Gross revenue was ${grossValue.toFixed(2)}, with ${refundedValue.toFixed(2)} in refunds, 
+                    resulting in net revenue of ${totalValue.toFixed(2)}.
+                  </Text>
+                </Box>
               )}
             </BlockStack>
           </Card>

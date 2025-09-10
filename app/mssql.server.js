@@ -26,10 +26,10 @@ console.log('Database config:', {
 
 // Configuration for MSSQL connection
 const config = {
-    server: process.env.MS_SQL_HOST,
-    user: process.env.MS_SQL_USERNAME,
-    password: process.env.MS_SQL_PASSWORD,
-    database: process.env.MS_SQL_DATABASE,
+    server: server,
+    user: user,
+    password: password,
+    database: database,
     port: 1433,
     options: {
       encrypt: true,

@@ -3,7 +3,7 @@
 client_id = "b27fdce170227e5caef3d04f1e6f10ab"
 name = "br-dj"
 handle = "br-dj"
-application_url = "https://prize-category-raleigh-threatened.trycloudflare.com"
+application_url = "https://diagnosis-suffering-gas-democracy.trycloudflare.com"
 embedded = true
 
 [build]
@@ -26,7 +26,7 @@ api_version = "2025-07"
 scopes = "write_products"
 
 [auth]
-redirect_urls = ["https://prize-category-raleigh-threatened.trycloudflare.com/auth/callback", "https://prize-category-raleigh-threatened.trycloudflare.com/auth/shopify/callback", "https://prize-category-raleigh-threatened.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://diagnosis-suffering-gas-democracy.trycloudflare.com/auth/callback", "https://diagnosis-suffering-gas-democracy.trycloudflare.com/auth/shopify/callback", "https://diagnosis-suffering-gas-democracy.trycloudflare.com/api/auth/callback"]
 
 [pos]
 embedded = false

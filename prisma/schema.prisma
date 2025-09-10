@@ -13,8 +13,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Session { 
-  id            String   @id @map("_id")
+model Session {
+  id            String    @id @map("_id")
   shop          String
   state         String
   isOnline      Boolean   @default(false)
