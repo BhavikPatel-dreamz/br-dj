@@ -421,6 +421,18 @@ export default function MonthlyOrdersByCategory() {
                   Enter at least one search criterion (Customer ID, Location ID, or Company Location ID) to analyze monthly orders by category.
                 </Text>
               )}
+              
+              {refundedValue > 0 && (
+                <Box padding="400" background="bg-surface-caution">
+                  <Text as="p" variant="bodyMd" color="subdued">
+                    💡 <strong>Refund Impact:</strong> This report shows accurate net quantities and values by category after subtracting refunds. 
+                    Gross revenue was ${grossValue.toFixed(2)}, with ${refundedValue.toFixed(2)} in refunds ({refundRate.toFixed(1)}% of orders), 
+                    resulting in net revenue of ${totalValue.toFixed(2)}.
+                    <br />
+                    📊 <strong>Database Source:</strong> shopify.refund + shopify.order_line_refund tables
+                  </Text>
+                </Box>
+              )}
             </BlockStack>
           </Card>
         </Layout.Section>
