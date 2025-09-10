@@ -2,7 +2,18 @@ import 'dotenv/config';
 import mssql from "../mssql.server.js";
 
 /**
- * Enhanced FHR Orders Actions with Refund Support (Based on Actual Database Schema)
+ * En      RefundedProducts AS (
+        -- Get all refunded products for orders from the same period (refunds can be from any date)
+        SELECT 
+          olr.order_line_id,
+          SUM(olr.quantity) as total_refunded_quantity,
+          SUM(olr.subtotal + olr.total_tax) as total_refunded_value
+        FROM brdjdb.shopify.order_line_refund AS olr
+        INNER JOIN brdjdb.shopify.refund AS r ON olr.refund_id = r.id
+        INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
+        INNER JOIN OrderedProducts op ON olr.order_line_id = op.order_line_id
+        GROUP BY olr.order_line_id
+      ),rders Actions with Refund Support (Based on Actual Database Schema)
  * Handles Full Historical Records operations for Shopify orders with refund calculations
  * 
  * Database Schema:
@@ -219,6 +230,40 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // Debug query to check refund data for the filtered period
+    const debugRefundQuery = `
+      SELECT COUNT(*) as total_refunds,
+             COUNT(DISTINCT r.order_id) as orders_with_refunds,
+             SUM(olr.quantity) as total_refunded_quantity,
+             SUM(olr.subtotal + olr.total_tax) as total_refunded_value
+      FROM brdjdb.shopify.refund AS r
+      INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
+      INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
+      ${whereClause}
+    `;
+
+    // Execute debug query first
+    const debugResult = await mssql.query(debugRefundQuery, params);
+    console.log("=== REFUND DEBUG QUERY (Category Function) ===");
+    console.log("Debug refund data:", debugResult[0]);
+
+    // Additional debug: Check if products have categories
+    const debugCategoryQuery = `
+      SELECT COALESCE(p.product_type, 'Uncategorized') as category,
+             COUNT(*) as product_count,
+             COUNT(DISTINCT p.id) as unique_products
+      FROM brdjdb.shopify.[order] AS o
+      INNER JOIN brdjdb.shopify.order_line AS ol ON o.id = ol.order_id
+      LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
+      ${whereClause}
+      GROUP BY COALESCE(p.product_type, 'Uncategorized')
+      ORDER BY product_count DESC
+    `;
+    
+    const debugCategoryResult = await mssql.query(debugCategoryQuery, params);
+    console.log("=== CATEGORY DEBUG ===");
+    console.log("Categories found:", debugCategoryResult);
+
     // Enhanced query that calculates net quantities and values by category
     const query = `
       WITH OrderedProducts AS (
@@ -300,38 +345,41 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
   
 
 
-    // Summary query for categories
+    // Summary query for categories with proper refund aggregation
     const summaryQuery = `
       WITH OrderStats AS (
         SELECT 
           o.id as order_id,
-          SUM(CAST(ol.price AS DECIMAL(10,2)) * ol.quantity) as order_value
+          SUM(CAST(ol.price AS DECIMAL(10,2)) * ol.quantity) as order_value,
+          COALESCE(p.product_type, 'Uncategorized') as category_name
         FROM brdjdb.shopify.[order] AS o
         INNER JOIN brdjdb.shopify.order_line AS ol ON o.id = ol.order_id
+        LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
         ${whereClause}
-        GROUP BY o.id
+        GROUP BY o.id, COALESCE(p.product_type, 'Uncategorized')
       ),
       RefundStats AS (
         SELECT 
           r.order_id,
+          COALESCE(p.product_type, 'Uncategorized') as category_name,
           SUM(olr.subtotal + olr.total_tax) as refunded_value
         FROM brdjdb.shopify.refund AS r
         INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
+        INNER JOIN brdjdb.shopify.order_line AS ol ON olr.order_line_id = ol.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
+        LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
         ${whereClause}
-        GROUP BY r.order_id
+        GROUP BY r.order_id, COALESCE(p.product_type, 'Uncategorized')
       )
       SELECT 
         COUNT(DISTINCT os.order_id) as total_orders,
         COUNT(DISTINCT CASE WHEN rs.order_id IS NOT NULL THEN os.order_id END) as orders_with_refunds,
-        COUNT(DISTINCT COALESCE(p.product_type, 'Uncategorized')) as total_categories,
+        COUNT(DISTINCT os.category_name) as total_categories,
         SUM(os.order_value) as gross_value,
         SUM(COALESCE(rs.refunded_value, 0)) as total_refunded_value,
         SUM(os.order_value - COALESCE(rs.refunded_value, 0)) as net_value
       FROM OrderStats os
-      LEFT JOIN RefundStats rs ON os.order_id = rs.order_id
-      LEFT JOIN brdjdb.shopify.order_line ol ON os.order_id = ol.order_id
-      LEFT JOIN brdjdb.shopify.product p ON ol.product_id = p.id
+      LEFT JOIN RefundStats rs ON os.order_id = rs.order_id AND os.category_name = rs.category_name
     `;
 
     // Execute both queries
@@ -340,9 +388,16 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       mssql.query(summaryQuery, params)
     ]);
 
-
-      console.log("-------------------",productResults)
-      console.log("-------------------",summaryResult)
+    console.log("=== PRODUCT RESULTS DEBUG ===");
+    console.log("Total product results:", productResults.length);
+    console.log("Sample products with refunds:", productResults.filter(p => p.refunded_quantity > 0).slice(0, 3));
+    console.log("Products with no refunds:", productResults.filter(p => !p.refunded_quantity || p.refunded_quantity === 0).length);
+    
+    console.log("=== SUMMARY RESULTS DEBUG ===");
+    console.log("Summary result:", summaryResult[0]);
+    
+    console.log("=== QUERY PARAMS DEBUG ===");
+    console.log("Applied filters:", params);
 
 
     // Group products by category

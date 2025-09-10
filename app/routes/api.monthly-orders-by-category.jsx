@@ -5,6 +5,8 @@ import {
   validateShopifyProxyRequest, 
   createSecureProxyResponse 
 } from "../utils/shopify-security.server.js";
+import { getMonthlyOrderProductsByCategoryWithRefunds } from "../actions/fhr-orders-refunds.server.js";
+
 
 /**
  * Secure API Route for Monthly Order Products by Category (with Refunds)
@@ -30,7 +32,7 @@ export const loader = async ({ request }) => {
     console.log("Request received for /api/monthly-orders-by-category");
 
     const url = new URL(request.url);
-    
+    /*
     // Check if this is a Shopify proxy request (has signature parameter)
     const signature = url.searchParams.get("signature");
     const isShopifyProxyRequest = !!signature;
@@ -96,7 +98,7 @@ export const loader = async ({ request }) => {
         console.log("No admin authentication, proceeding as public request");
       }
     }
-
+    */
     // Parse query parameters
     const customerId = url.searchParams.get("customerId")?.trim() || "";
     const locationId = url.searchParams.get("locationId")?.trim() || "";
@@ -137,7 +139,7 @@ export const loader = async ({ request }) => {
         data: null
       }, { status: 400 });
     }
-
+    
     // Build filters object
     const filters = {};
     if (customerId) filters.customerId = customerId;
@@ -149,7 +151,7 @@ export const loader = async ({ request }) => {
     filters.year = searchYear;
 
     // Get monthly order products grouped by category (with refunds accounted for)
-    const result = await getMonthlyOrderProductsByCategory(filters);
+    const result = await getMonthlyOrderProductsByCategoryWithRefunds(filters);
 
     const responseData = {
       success: true,
@@ -166,29 +168,29 @@ export const loader = async ({ request }) => {
           refundRate: result.refundRate || 0,
           month: searchMonth,
           year: searchYear,
-          isAuthenticated: isAuthenticated,
-          shopifyUser: isAuthenticated 
-            ? (shopifySession?.shop || customerInfo?.shop || 'authenticated') 
-            : null,
-          customerInfo: requireSecureAuth ? {
-            customerId: customerInfo?.customerId || null,
-            isLoggedIn: customerInfo?.isLoggedIn || false
-          } : null,
+          // isAuthenticated: isAuthenticated,
+          // shopifyUser: isAuthenticated 
+          //   ? (shopifySession?.shop || customerInfo?.shop || 'authenticated') 
+          //   : null,
+          // customerInfo: requireSecureAuth ? {
+          //   customerId: customerInfo?.customerId || null,
+          //   isLoggedIn: customerInfo?.isLoggedIn || false
+          // } : null,
           filters: {
             customerId: customerId || null,
             locationId: locationId || null,
             companyLocationId: companyLocationId || null
           },
-          secureMode: requireSecureAuth,
+         // secureMode: requireSecureAuth,
           refundAware: true // Indicates this response includes refund calculations
         }
       }
     };
 
     // Return secure response if secure authentication was used
-    if (requireSecureAuth) {
-      return createSecureProxyResponse(responseData);
-    }
+    // if (requireSecureAuth) {
+    //   return createSecureProxyResponse(responseData);
+    // }
 
     // Standard JSON response for regular requests
     return json(responseData);
@@ -204,9 +206,9 @@ export const loader = async ({ request }) => {
     };
 
     // Return secure error response if secure authentication was used
-    if (url.searchParams.get("secure") === "true") {
-      return createSecureProxyResponse(errorResponse, { status: 500 });
-    }
+    // if (url.searchParams.get("secure") === "true") {
+    //   return createSecureProxyResponse(errorResponse, { status: 500 });
+    // }
     
     return json(errorResponse, { status: 500 });
   }

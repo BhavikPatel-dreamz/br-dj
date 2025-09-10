@@ -19,7 +19,7 @@ import {
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
-import { getMonthlyOrderProductsWithRefunds } from "../actions/fhr-orders-with-refunds.server.js";
+import { getMonthlyOrderProductsWithRefunds } from "../actions/fhr-orders-refunds.server.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
