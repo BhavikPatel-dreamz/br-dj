@@ -1,7 +1,20 @@
 import mssql from "../mssql.server.js";
 
 /**
- * Enhanced FHR Orders Actions with Refund Support
+ * Enhanced FHR Orders      RefundedProducts AS (
+        -- Get refunded products for the same period using refund_line_item table
+        SELECT 
+          ol.product_id,
+          ol.variant_id,
+          rl.line_item_id,
+          rl.quantity as refunded_quantity,
+          CAST(ol.price AS DECIMAL(10,2)) * rl.quantity as refunded_value
+        FROM brdjdb.shopify.refund AS r
+        INNER JOIN brdjdb.shopify.refund_line_item AS rl ON r.id = rl.refund_id
+        INNER JOIN brdjdb.shopify.order_line AS ol ON rl.line_item_id = ol.id
+        INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
+        ${whereClause}
+      )Refund Support
  * Handles Full Historical Records operations for Shopify orders with refund calculations
  */
 
@@ -77,7 +90,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
         INNER JOIN brdjdb.shopify.refund_line_item AS rl ON r.id = rl.refund_id
         INNER JOIN brdjdb.shopify.order_line AS ol ON rl.line_item_id = ol.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        ${whereClause.replace('WHERE', 'WHERE')}
+        ${whereClause}
       )
       SELECT 
         op.product_id,
@@ -130,7 +143,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
         INNER JOIN brdjdb.shopify.refund_line_item AS rl ON r.id = rl.refund_id
         INNER JOIN brdjdb.shopify.order_line AS ol ON rl.line_item_id = ol.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        ${whereClause.replace('WHERE', 'WHERE')}
+        ${whereClause}
         GROUP BY r.order_id
       )
       SELECT 
@@ -244,7 +257,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
         INNER JOIN brdjdb.shopify.refund_line_item AS rl ON r.id = rl.refund_id
         INNER JOIN brdjdb.shopify.order_line AS ol ON rl.line_item_id = ol.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        ${whereClause.replace('WHERE', 'WHERE')}
+        ${whereClause}
       ),
       ProductSummary AS (
         SELECT 
@@ -314,7 +327,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
         INNER JOIN brdjdb.shopify.refund_line_item AS rl ON r.id = rl.refund_id
         INNER JOIN brdjdb.shopify.order_line AS ol ON rl.line_item_id = ol.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        ${whereClause.replace('WHERE', 'WHERE')}
+        ${whereClause}
         GROUP BY r.order_id
       )
       SELECT 

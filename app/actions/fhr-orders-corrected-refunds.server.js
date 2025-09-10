@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import mssql from "../mssql.server.js";
 
 /**
@@ -80,7 +81,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
         FROM brdjdb.shopify.order_line_refund AS olr
         INNER JOIN brdjdb.shopify.refund AS r ON olr.refund_id = r.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        ${whereClause.replace('WHERE', 'WHERE')}
+        ${whereClause}
         GROUP BY olr.order_line_id
       )
       SELECT 
@@ -131,7 +132,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
         FROM brdjdb.shopify.refund AS r
         INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        ${whereClause.replace('WHERE', 'WHERE')}
+        ${whereClause}
         GROUP BY r.order_id
       )
       SELECT 
@@ -246,7 +247,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
         FROM brdjdb.shopify.order_line_refund AS olr
         INNER JOIN brdjdb.shopify.refund AS r ON olr.refund_id = r.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        ${whereClause.replace('WHERE', 'WHERE')}
+        ${whereClause}
         GROUP BY olr.order_line_id
       ),
       ProductSummary AS (
@@ -313,7 +314,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
         FROM brdjdb.shopify.refund AS r
         INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        ${whereClause.replace('WHERE', 'WHERE')}
+        ${whereClause}
         GROUP BY r.order_id
       )
       SELECT 

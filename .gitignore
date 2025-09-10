@@ -365,3 +365,6 @@ secrets.json
 
 # Ignore specific project files that contain sensitive data
 test-connection.js.local
+
+
+test-Query/
