@@ -2,18 +2,7 @@ import 'dotenv/config';
 import mssql from "../mssql.server.js";
 
 /**
- * En      RefundedProducts AS (
-        -- Get all refunded products for orders from the same period (refunds can be from any date)
-        SELECT 
-          olr.order_line_id,
-          SUM(olr.quantity) as total_refunded_quantity,
-          SUM(olr.subtotal + olr.total_tax) as total_refunded_value
-        FROM brdjdb.shopify.order_line_refund AS olr
-        INNER JOIN brdjdb.shopify.refund AS r ON olr.refund_id = r.id
-        INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        INNER JOIN OrderedProducts op ON olr.order_line_id = op.order_line_id
-        GROUP BY olr.order_line_id
-      ),rders Actions with Refund Support (Based on Actual Database Schema)
+ * Orders Actions with Refund Support (Based on Actual Database Schema)
  * Handles Full Historical Records operations for Shopify orders with refund calculations
  * 
  * Database Schema:
@@ -88,7 +77,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
         SELECT 
           olr.order_line_id,
           SUM(olr.quantity) as total_refunded_quantity,
-          SUM(olr.subtotal + olr.total_tax) as total_refunded_value
+          SUM(olr.subtotal) as total_refunded_value
         FROM brdjdb.shopify.order_line_refund AS olr
         INNER JOIN brdjdb.shopify.refund AS r ON olr.refund_id = r.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
@@ -121,12 +110,11 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
         op.sku,
         op.vendor,
         op.product_type
-      HAVING SUM(op.ordered_quantity - COALESCE(rp.total_refunded_quantity, 0)) > 0
       ORDER BY net_quantity DESC, net_value DESC
     `;
 
-    // Enhanced summary query with refund metrics
-    const summaryQuery = `
+    // Enhanced summary query with refund metrics - includes ALL products (even fully refunded ones)
+    const productSummaryQuery = `
       WITH OrderStats AS (
         SELECT 
           o.id as order_id,
@@ -139,7 +127,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
       RefundStats AS (
         SELECT 
           r.order_id,
-          SUM(olr.subtotal + olr.total_tax) as refunded_value
+          SUM(olr.subtotal) as refunded_value
         FROM brdjdb.shopify.refund AS r
         INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
@@ -162,7 +150,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
     // Execute both queries
     const [products, summaryResult] = await Promise.all([
       mssql.query(query, params),
-      mssql.query(summaryQuery, params)
+      mssql.query(productSummaryQuery, params)
     ]);
 
     const summary = summaryResult[0] || { 
@@ -171,7 +159,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
       total_products: 0, 
       gross_value: 0,
       total_refunded_value: 0,
-      net_value: 0 
+      net_value: 0
     };
 
     return {
@@ -230,12 +218,16 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    // console.log("=== APPLIED FILTERS ===");
+    // console.log("Where Clause:", whereClause);
+    // console.log("Parameters:", params);
+
     // Debug query to check refund data for the filtered period
     const debugRefundQuery = `
       SELECT COUNT(*) as total_refunds,
              COUNT(DISTINCT r.order_id) as orders_with_refunds,
              SUM(olr.quantity) as total_refunded_quantity,
-             SUM(olr.subtotal + olr.total_tax) as total_refunded_value
+             SUM(olr.subtotal) as total_refunded_value
       FROM brdjdb.shopify.refund AS r
       INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
       INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
@@ -244,25 +236,8 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
 
     // Execute debug query first
     const debugResult = await mssql.query(debugRefundQuery, params);
-    console.log("=== REFUND DEBUG QUERY (Category Function) ===");
-    console.log("Debug refund data:", debugResult[0]);
-
-    // Additional debug: Check if products have categories
-    const debugCategoryQuery = `
-      SELECT COALESCE(p.product_type, 'Uncategorized') as category,
-             COUNT(*) as product_count,
-             COUNT(DISTINCT p.id) as unique_products
-      FROM brdjdb.shopify.[order] AS o
-      INNER JOIN brdjdb.shopify.order_line AS ol ON o.id = ol.order_id
-      LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
-      ${whereClause}
-      GROUP BY COALESCE(p.product_type, 'Uncategorized')
-      ORDER BY product_count DESC
-    `;
-    
-    const debugCategoryResult = await mssql.query(debugCategoryQuery, params);
-    console.log("=== CATEGORY DEBUG ===");
-    console.log("Categories found:", debugCategoryResult);
+    // console.log("=== REFUND DEBUG QUERY ===");
+    // console.log("Debug refund data:", debugResult[0]);
 
     // Enhanced query that calculates net quantities and values by category
     const query = `
@@ -285,14 +260,15 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
         ${whereClause}
       ),
       RefundedProducts AS (
+        -- Get all refunded products for orders from the same period (refunds can be from any date)
         SELECT 
           olr.order_line_id,
           SUM(olr.quantity) as total_refunded_quantity,
-          SUM(olr.subtotal + olr.total_tax) as total_refunded_value
+          SUM(olr.subtotal) as total_refunded_value
         FROM brdjdb.shopify.order_line_refund AS olr
         INNER JOIN brdjdb.shopify.refund AS r ON olr.refund_id = r.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        ${whereClause}
+        INNER JOIN OrderedProducts op ON olr.order_line_id = op.order_line_id
         GROUP BY olr.order_line_id
       ),
       ProductSummary AS (
@@ -320,7 +296,6 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
           op.product_name,
           op.sku,
           op.vendor
-        HAVING SUM(op.ordered_quantity - COALESCE(rp.total_refunded_quantity, 0)) > 0
       )
       SELECT 
         category_name,
@@ -341,12 +316,11 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       ORDER BY category_name, net_quantity DESC, net_value DESC
     `;
 
+    console.log("=== MAIN QUERY ===");
+    console.log(query);
 
-  
-
-
-    // Summary query for categories with proper refund aggregation
-    const summaryQuery = `
+    // Summary query for categories with proper refund aggregation - includes ALL products
+    const categorySummaryQuery = `
       WITH OrderStats AS (
         SELECT 
           o.id as order_id,
@@ -362,7 +336,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
         SELECT 
           r.order_id,
           COALESCE(p.product_type, 'Uncategorized') as category_name,
-          SUM(olr.subtotal + olr.total_tax) as refunded_value
+          SUM(olr.subtotal) as refunded_value
         FROM brdjdb.shopify.refund AS r
         INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
         INNER JOIN brdjdb.shopify.order_line AS ol ON olr.order_line_id = ol.id
@@ -382,23 +356,22 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       LEFT JOIN RefundStats rs ON os.order_id = rs.order_id AND os.category_name = rs.category_name
     `;
 
+    // console.log("=== SUMMARY QUERY ===");
+    // console.log(categorySummaryQuery);
+
     // Execute both queries
     const [productResults, summaryResult] = await Promise.all([
       mssql.query(query, params),
-      mssql.query(summaryQuery, params)
+      mssql.query(categorySummaryQuery, params)
     ]);
 
-    console.log("=== PRODUCT RESULTS DEBUG ===");
-    console.log("Total product results:", productResults.length);
-    console.log("Sample products with refunds:", productResults.filter(p => p.refunded_quantity > 0).slice(0, 3));
-    console.log("Products with no refunds:", productResults.filter(p => !p.refunded_quantity || p.refunded_quantity === 0).length);
+    // console.log("=== PRODUCT RESULTS DEBUG ===");
+    // console.log("Total product results:", productResults.length);
+    // console.log("Sample products with refunds:", productResults.filter(p => p.refunded_quantity > 0).slice(0, 3));
+    // console.log("Products with no refunds:", productResults.filter(p => !p.refunded_quantity || p.refunded_quantity === 0).length);
     
-    console.log("=== SUMMARY RESULTS DEBUG ===");
-    console.log("Summary result:", summaryResult[0]);
-    
-    console.log("=== QUERY PARAMS DEBUG ===");
-    console.log("Applied filters:", params);
-
+    // console.log("=== SUMMARY RESULTS DEBUG ===");
+    // console.log("Summary result:", summaryResult[0]);
 
     // Group products by category
     const categorizedData = {};
@@ -447,7 +420,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       total_categories: 0, 
       gross_value: 0,
       total_refunded_value: 0,
-      net_value: 0 
+      net_value: 0
     };
 
     return {

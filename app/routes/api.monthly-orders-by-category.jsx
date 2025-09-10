@@ -6,6 +6,7 @@ import {
   createSecureProxyResponse 
 } from "../utils/shopify-security.server.js";
 import { getMonthlyOrderProductsByCategoryWithRefunds } from "../actions/fhr-orders-refunds.server.js";
+import { getOrders, getOrdersCount } from "../actions/fhr-orders.server.js";
 
 
 /**
@@ -150,7 +151,7 @@ export const loader = async ({ request }) => {
     filters.month = searchMonth;
     filters.year = searchYear;
 
-    // Get monthly order products grouped by category (with refunds accounted for)
+  
     const result = await getMonthlyOrderProductsByCategoryWithRefunds(filters);
 
     const responseData = {

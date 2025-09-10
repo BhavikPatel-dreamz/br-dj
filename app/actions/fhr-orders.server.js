@@ -16,6 +16,8 @@ import mssql from "../mssql.server.js";
  * @param {string} filters.orderNumber - Order number filter
  * @param {string} filters.financialStatus - Financial status filter
  * @param {string} filters.fulfillmentStatus - Fulfillment status filter
+ * @param {string} filters.month - Month (01-12)
+ * @param {string} filters.year - Year (YYYY)
  * @param {number} limit - Number of records to return (default: 100)
  * @param {number} offset - Number of records to skip (default: 0)
  * @returns {Promise<Array>} Array of order objects with full FHR schema
@@ -57,6 +59,20 @@ export async function getOrders(filters = {}, limit = 100, offset = 0) {
     if (filters.fulfillmentStatus) {
       conditions.push('o.fulfillment_status = @fulfillmentStatus');
       params.fulfillmentStatus = filters.fulfillmentStatus;
+    }
+
+    // Add date filters for the specified month/year
+    if (filters.month && filters.year) {
+      conditions.push('MONTH(o.created_at) = @month');
+      conditions.push('YEAR(o.created_at) = @year');
+      params.month = parseInt(filters.month);
+      params.year = parseInt(filters.year);
+    } else if (filters.year) {
+      conditions.push('YEAR(o.created_at) = @year');
+      params.year = parseInt(filters.year);
+    } else if (filters.month) {
+      conditions.push('MONTH(o.created_at) = @month');
+      params.month = parseInt(filters.month);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -304,6 +320,8 @@ export async function getOrderById(orderId) {
 /**
  * Get order count based on filters
  * @param {Object} filters - Filter criteria (same as getOrders)
+ * @param {string} filters.month - Month (01-12)
+ * @param {string} filters.year - Year (YYYY)
  * @returns {Promise<number>} Total count of orders matching filters
  */
 export async function getOrdersCount(filters = {}) {
@@ -343,6 +361,20 @@ export async function getOrdersCount(filters = {}) {
     if (filters.fulfillmentStatus) {
       conditions.push('o.fulfillment_status = @fulfillmentStatus');
       params.fulfillmentStatus = filters.fulfillmentStatus;
+    }
+
+    // Add date filters for the specified month/year
+    if (filters.month && filters.year) {
+      conditions.push('MONTH(o.created_at) = @month');
+      conditions.push('YEAR(o.created_at) = @year');
+      params.month = parseInt(filters.month);
+      params.year = parseInt(filters.year);
+    } else if (filters.year) {
+      conditions.push('YEAR(o.created_at) = @year');
+      params.year = parseInt(filters.year);
+    } else if (filters.month) {
+      conditions.push('MONTH(o.created_at) = @month');
+      params.month = parseInt(filters.month);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
