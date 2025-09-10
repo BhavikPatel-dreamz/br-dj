@@ -44,8 +44,7 @@ export function verifyShopifyProxySignature(queryParams, signature, secret) {
       .update(message)
       .digest('hex');
 
-    console.log("Generated signature:", digest);
-    console.log("Signature match:", digest === signature);
+
 
     return digest === signature;
   } catch (error) {

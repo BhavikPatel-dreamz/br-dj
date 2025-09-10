@@ -102,7 +102,7 @@ export default function SearchOrders() {
 
   const isSearching = navigation.state === "loading";
 
-  console.log("Orders:", orders);
+
   const rows = (orders || []).map((o) => [
     o.order_number ? (
       <Link 

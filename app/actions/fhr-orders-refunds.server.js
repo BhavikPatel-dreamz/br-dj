@@ -218,10 +218,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // console.log("=== APPLIED FILTERS ===");
-    // console.log("Where Clause:", whereClause);
-    // console.log("Parameters:", params);
-
+    
     // Debug query to check refund data for the filtered period
     const debugRefundQuery = `
       SELECT COUNT(*) as total_refunds,
@@ -235,9 +232,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
     `;
 
     // Execute debug query first
-    const debugResult = await mssql.query(debugRefundQuery, params);
-    // console.log("=== REFUND DEBUG QUERY ===");
-    // console.log("Debug refund data:", debugResult[0]);
+   
 
     // Enhanced query that calculates net quantities and values by category
     const query = `
@@ -316,8 +311,6 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       ORDER BY category_name, net_quantity DESC, net_value DESC
     `;
 
-    console.log("=== MAIN QUERY ===");
-    console.log(query);
 
     // Summary query for categories with proper refund aggregation - includes ALL products
     const categorySummaryQuery = `
@@ -356,8 +349,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       LEFT JOIN RefundStats rs ON os.order_id = rs.order_id AND os.category_name = rs.category_name
     `;
 
-    // console.log("=== SUMMARY QUERY ===");
-    // console.log(categorySummaryQuery);
+
 
     // Execute both queries
     const [productResults, summaryResult] = await Promise.all([
@@ -365,13 +357,8 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       mssql.query(categorySummaryQuery, params)
     ]);
 
-    // console.log("=== PRODUCT RESULTS DEBUG ===");
-    // console.log("Total product results:", productResults.length);
-    // console.log("Sample products with refunds:", productResults.filter(p => p.refunded_quantity > 0).slice(0, 3));
-    // console.log("Products with no refunds:", productResults.filter(p => !p.refunded_quantity || p.refunded_quantity === 0).length);
-    
-    // console.log("=== SUMMARY RESULTS DEBUG ===");
-    // console.log("Summary result:", summaryResult[0]);
+
+
 
     // Group products by category
     const categorizedData = {};

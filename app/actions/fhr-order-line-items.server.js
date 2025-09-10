@@ -137,7 +137,7 @@ export async function getOrderLineItems(filters = {}, limit = 100, offset = 0) {
       params.offset = parseInt(offset) || 0;
     }
 
-    console.log('Query Parameters:============', query, params);
+
 
     const lineItems = await mssql.query(query, params);
     return lineItems;
