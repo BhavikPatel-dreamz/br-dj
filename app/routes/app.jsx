@@ -24,11 +24,12 @@ export default function App() {
           <Link to="/app" rel="home">
             Home
           </Link>
-          <Link to="/app/additional">Additional page</Link>
-          <Link to="/app/search">Search orders</Link>
+          
+          {/* <Link to="/app/search">Search orders</Link>
           <Link to="/app/products">Search products</Link>
           <Link to="/app/monthly-orders">Monthly Orders</Link>
-          <Link to="/app/monthly-orders-by-category">Orders by Category</Link>
+          <Link to="/app/monthly-orders-by-category">Orders by Category</Link> */}
+          <Link to="/app/budget-management">Budget Management</Link>
           
         </NavMenu>
         <Outlet />
