@@ -2,7 +2,7 @@
   "name": "br-dj",
   "private": true,
   "scripts": {
-    "build": "npx prisma generate && remix vite:build",
+   "build": "vite build && vite build --ssr",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
     "predev": "prisma generate && prisma db push",

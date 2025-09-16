@@ -1,12 +1,12 @@
 import { json } from "@remix-run/node";
-import { authenticate } from "../shopify.server";
+
 
 import {
   validateShopifyProxyRequest,
   createSecureProxyResponse,
 } from "../utils/shopify-security.server.js";
 import { getMonthlyOrderProductsByCategoryWithRefunds } from "../actions/fhr-orders-refunds.server.js";
-import { getOrders, getOrdersCount } from "../actions/fhr-orders.server.js";
+
 
 /**
  * Secure API Route for Monthly Order Products by Category (with Refunds)

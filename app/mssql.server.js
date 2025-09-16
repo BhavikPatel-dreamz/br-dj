@@ -41,8 +41,8 @@ const config = {
     options: {
       encrypt: true,
       trustServerCertificate: true,
-      connectTimeout: 10000,
-      requestTimeout: 10000
+      connectTimeout: 30000,
+      requestTimeout: 30000
     
   },
   pool: {

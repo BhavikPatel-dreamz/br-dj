@@ -48,3 +48,16 @@ export {
   getUniqueVendors,
   getUniqueProductTypes
 } from './fhr-products.server.js';
+
+// FHR Budget Actions
+export {
+  getBudgets,
+  createBudget,
+  getBudgetById,
+  updateBudget,
+  deleteBudget,
+  getBudgetStats,
+  getBudgetCategories,
+  validateBudgetCategories,
+  BUDGET_CATEGORIES
+} from './fhr-budget.server.js';

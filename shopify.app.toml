@@ -3,7 +3,7 @@
 client_id = "b27fdce170227e5caef3d04f1e6f10ab"
 name = "br-dj"
 handle = "br-dj"
-application_url = "https://41ec77a9df85.ngrok-free.app"
+application_url = "https://067b5ceba229.ngrok-free.app"
 embedded = true
 
 [build]
@@ -26,7 +26,7 @@ api_version = "2025-07"
 scopes = "write_products"
 
 [auth]
-redirect_urls = ["https://41ec77a9df85.ngrok-free.app/auth/callback", "https://41ec77a9df85.ngrok-free.app/auth/shopify/callback", "https://41ec77a9df85.ngrok-free.app/api/auth/callback"]
+redirect_urls = ["https://067b5ceba229.ngrok-free.app/auth/callback", "https://067b5ceba229.ngrok-free.app/auth/shopify/callback", "https://067b5ceba229.ngrok-free.app/api/auth/callback"]
 
 [pos]
 embedded = false

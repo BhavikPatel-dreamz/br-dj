@@ -22,6 +22,20 @@ import mssql from "../mssql.server.js";
  * @param {string} filters.year - Year (YYYY)
  * @returns {Promise<Object>} Object containing products array and summary totals
  */
+
+function generateUniqueRandomNumbers(count, min, max) {
+  if (count > (max - min + 1)) {
+    throw new Error('Count cannot be greater than the range of available numbers.');
+  }
+
+  const uniqueNumbers = new Set();
+  while (uniqueNumbers.size < count) {
+    const randomNumber = Math.floor(Math.random() * (max - min + 1)) + min;
+    uniqueNumbers.add(randomNumber);
+  }
+  return Array.from(uniqueNumbers);
+}
+
 export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
   try {
     const conditions = [];
@@ -398,6 +412,10 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       categorizedData[categoryName].gross_value += product.gross_value || 0;
       categorizedData[categoryName].refunded_quantity += product.refunded_quantity || 0;
       categorizedData[categoryName].refunded_value += product.refunded_value || 0;
+      categorizedData[categoryName].budget = generateUniqueRandomNumbers(1, 5000, 20000)[0]; // Random budget between 5,000 and 20,000
+      
+      
+      
     });
 
     const categories = Object.values(categorizedData);

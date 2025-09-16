@@ -1,4 +1,4 @@
-import { useNavigate, useSubmit, useNavigation, useActionData } from "@remix-run/react";
+import { useNavigate, useSubmit, useNavigation, useActionData, useLoaderData } from "@remix-run/react";
 import { useState } from "react";
 import { json, redirect } from "@remix-run/node";
 import {
@@ -11,14 +11,23 @@ import {
   Button,
   InlineStack,
   FormLayout,
+  Select,
+  Icon,
 } from "@shopify/polaris";
+import { DeleteIcon } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server.js";
-import { createBudget } from "../actions/fhr-budget.server.js";
+import { createBudget, getBudgetCategories } from "../actions/fhr-budget.server.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
-  return json({});
+  
+  // Return the predefined categories for the frontend
+  const categories = getBudgetCategories();
+  
+  return json({
+    categories
+  });
 };
 
 export const action = async ({ request }) => {
@@ -52,52 +61,30 @@ export default function CreateBudget() {
   const submit = useSubmit();
   const navigation = useNavigation();
   const actionData = useActionData();
+  const { categories: availableCategories } = useLoaderData();
 
   const [budgetName, setBudgetName] = useState("");
-  
-  // Predefined categories with values
-  const [categories, setCategories] = useState({
-    "Gen Nsg>Medical Supplies": "",
-    "Gen Nsg>Incontinent Supplies": "",
-    "Capital>Fixed Equip": "",
-    "Capital>Leasehold Improvements": "",
-    "Capital>Major Moveable Equip": "",
-    "Housekeeping>Minor Equip": "",
-    "Dietary>Minor Equip": "",
-    "Housekeeping>Supplies": "",
-    "Admin & Gen>Office Supplies": "",
-    "Therapy>Minor Equip": "",
-    "Maintenance>Supplies": "",
-    "Dietary>Supplements": "",
-    "Activities>Minor Equip": "",
-    "Activities>Supplies": "",
-    "Admin & Gen>Minor Equip": "",
-    "Gen Nsg>House": "",
-    "Gen Nsg>Minor Equip": "",
-    "Laundry>Linens": "",
-    "Laundry>Minor Equip": "",
-    "Therapy>Therapy Supplies": "",
-    "Gen Nsg>Wound Care": "",
-    "Maintenance>Minor Equip": "",
-    "Gen Nsg>PEN Supplies": "",
-    "Gen Nsg>Urology & Ostomy": "",
-    "Therapy>Respiratory Supplies": "",
-    "Gen Nsg>Forms & Printing": "",
-    "Dietary>Dietary Supplies": "",
-    "Gen Nsg>Personal Items": "",
-    "Gen Nsg>Rental Equip": ""
-  });
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState("");
 
   const isLoading = navigation.state === "submitting";
 
   // Handle budget creation
   const handleCreateBudget = () => {
-    if (!budgetName.trim()) return;
+    if (!budgetName.trim() || selectedCategories.length === 0) return;
+
+    // Convert selected categories array to object format
+    const categoriesObject = {};
+    selectedCategories.forEach(item => {
+      if (item.value && parseFloat(item.value) > 0) {
+        categoriesObject[item.category] = item.value;
+      }
+    });
 
     const formData = new FormData();
     formData.append("actionType", "create");
     formData.append("name", budgetName);
-    formData.append("categories", JSON.stringify(categories));
+    formData.append("categories", JSON.stringify(categoriesObject));
 
     submit(formData, { method: "post" });
   };
@@ -107,12 +94,39 @@ export default function CreateBudget() {
     navigate("/app/budget-management");
   };
 
-  // Update category value
-  const updateCategoryValue = (categoryName, value) => {
-    setCategories(prev => ({
+  // Add a new category
+  const addCategory = () => {
+    if (!selectedCategory || selectedCategories.find(item => item.category === selectedCategory)) {
+      return;
+    }
+
+    setSelectedCategories(prev => [
       ...prev,
-      [categoryName]: value
-    }));
+      { category: selectedCategory, value: "" }
+    ]);
+    setSelectedCategory("");
+  };
+
+  // Remove a category
+  const removeCategory = (index) => {
+    setSelectedCategories(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Update category value
+  const updateCategoryValue = (index, value) => {
+    setSelectedCategories(prev => 
+      prev.map((item, i) => 
+        i === index ? { ...item, value } : item
+      )
+    );
+  };
+
+  // Get available options for the dropdown (excluding already selected ones)
+  const getAvailableOptions = () => {
+    const selectedCategoryNames = selectedCategories.map(item => item.category);
+    return availableCategories
+      .filter(category => !selectedCategoryNames.includes(category))
+      .map(category => ({ label: category, value: category }));
   };
 
   // Format currency
@@ -124,11 +138,26 @@ export default function CreateBudget() {
   };
 
   // Calculate total budget amount
-  const calculateTotal = (categories) => {
-    return Object.values(categories).reduce((sum, value) => {
-      return sum + (parseFloat(value) || 0);
+  const calculateTotal = () => {
+    return selectedCategories.reduce((sum, item) => {
+      return sum + (parseFloat(item.value) || 0);
     }, 0);
   };
+
+  // Group categories by department for display
+  const groupCategoriesByDepartment = (categories) => {
+    const groups = {};
+    categories.forEach((item, index) => {
+      const department = item.category.split('>')[0];
+      if (!groups[department]) {
+        groups[department] = [];
+      }
+      groups[department].push({ ...item, index });
+    });
+    return groups;
+  };
+
+  const categoriesByDepartment = groupCategoriesByDepartment(selectedCategories);
 
   return (
     <Page>
@@ -148,7 +177,7 @@ export default function CreateBudget() {
                     primary 
                     onClick={handleCreateBudget}
                     loading={isLoading}
-                    disabled={!budgetName.trim()}
+                    disabled={!budgetName.trim() || selectedCategories.length === 0}
                   >
                     Create Budget
                   </Button>
@@ -175,103 +204,98 @@ export default function CreateBudget() {
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
-              <Text variant="headingMd" as="h2">Category Allocations</Text>
+              <Text variant="headingMd" as="h2">Add Categories</Text>
               <Text variant="bodySm" tone="subdued">
-                Assign dollar amounts to each category. Leave empty for categories you don't want to include.
+                Select categories from the dropdown and assign budget amounts.
               </Text>
 
-              {/* Group categories by department for better organization */}
-              <BlockStack gap="400">
-                {/* General Nursing Categories */}
-                <Card>
-                  <BlockStack gap="300">
-                    <Text variant="headingSm" as="h3">General Nursing</Text>
-                    <FormLayout>
-                      {Object.entries(categories)
-                        .filter(([categoryName]) => categoryName.startsWith("Gen Nsg>"))
-                        .map(([categoryName, value]) => (
-                          <TextField
-                            key={categoryName}
-                            label={categoryName}
-                            type="number"
-                            value={value}
-                            onChange={(newValue) => updateCategoryValue(categoryName, newValue)}
-                            placeholder="0.00"
-                            prefix="$"
-                            autoComplete="off"
-                          />
-                        ))}
-                    </FormLayout>
-                  </BlockStack>
-                </Card>
-
-                {/* Capital Categories */}
-                <Card>
-                  <BlockStack gap="300">
-                    <Text variant="headingSm" as="h3">Capital</Text>
-                    <FormLayout>
-                      {Object.entries(categories)
-                        .filter(([categoryName]) => categoryName.startsWith("Capital>"))
-                        .map(([categoryName, value]) => (
-                          <TextField
-                            key={categoryName}
-                            label={categoryName}
-                            type="number"
-                            value={value}
-                            onChange={(newValue) => updateCategoryValue(categoryName, newValue)}
-                            placeholder="0.00"
-                            prefix="$"
-                            autoComplete="off"
-                          />
-                        ))}
-                    </FormLayout>
-                  </BlockStack>
-                </Card>
-
-                {/* Other Department Categories */}
-                <Card>
-                  <BlockStack gap="300">
-                    <Text variant="headingSm" as="h3">Other Departments</Text>
-                    <FormLayout>
-                      {Object.entries(categories)
-                        .filter(([categoryName]) => 
-                          !categoryName.startsWith("Gen Nsg>") && 
-                          !categoryName.startsWith("Capital>")
-                        )
-                        .map(([categoryName, value]) => (
-                          <TextField
-                            key={categoryName}
-                            label={categoryName}
-                            type="number"
-                            value={value}
-                            onChange={(newValue) => updateCategoryValue(categoryName, newValue)}
-                            placeholder="0.00"
-                            prefix="$"
-                            autoComplete="off"
-                          />
-                        ))}
-                    </FormLayout>
-                  </BlockStack>
-                </Card>
-              </BlockStack>
+              {/* Category Selection */}
+              <FormLayout>
+                <InlineStack gap="300" align="end">
+                  <div style={{ flex: 1 }}>
+                    <Select
+                      label="Select Category"
+                      options={[
+                        { label: "Choose a category...", value: "", disabled: true },
+                        ...getAvailableOptions()
+                      ]}
+                      value={selectedCategory}
+                      onChange={setSelectedCategory}
+                    />
+                  </div>
+                  <Button
+                    onClick={addCategory}
+                    disabled={!selectedCategory}
+                  >
+                    Add Category
+                  </Button>
+                </InlineStack>
+              </FormLayout>
             </BlockStack>
           </Card>
         </Layout.Section>
+
+        {/* Selected Categories */}
+        {selectedCategories.length > 0 && (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <Text variant="headingMd" as="h2">Category Allocations</Text>
+
+                {/* Group categories by department */}
+                {Object.entries(categoriesByDepartment).map(([department, departmentCategories]) => (
+                  <Card key={department}>
+                    <BlockStack gap="300">
+                      <Text variant="headingSm" as="h3">{department}</Text>
+                      <FormLayout>
+                        {departmentCategories.map((item) => (
+                          <InlineStack key={item.index} gap="200" align="end">
+                            <div style={{ flex: 1 }}>
+                              <TextField
+                                label={item.category.split('>')[1] || item.category}
+                                type="number"
+                                value={item.value}
+                                onChange={(newValue) => updateCategoryValue(item.index, newValue)}
+                                placeholder="0.00"
+                                prefix="$"
+                                autoComplete="off"
+                              />
+                            </div>
+                            <Button
+                              icon={DeleteIcon}
+                              onClick={() => removeCategory(item.index)}
+                              accessibilityLabel={`Remove ${item.category}`}
+                            />
+                          </InlineStack>
+                        ))}
+                      </FormLayout>
+                    </BlockStack>
+                  </Card>
+                ))}
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        )}
 
         {/* Total Amount Summary */}
-        <Layout.Section>
-          <Card>
-            <BlockStack gap="200">
-              <Text variant="headingMd" as="h3">Budget Summary</Text>
-              <InlineStack align="space-between">
-                <Text variant="bodyLg" as="p">Total Budget Amount:</Text>
-                <Text variant="headingLg" as="p">
-                  {formatCurrency(calculateTotal(categories))}
+        {selectedCategories.length > 0 && (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="200">
+                <Text variant="headingMd" as="h3">Budget Summary</Text>
+                <InlineStack align="space-between">
+                  <Text variant="bodyLg" as="p">Total Budget Amount:</Text>
+                  <Text variant="headingLg" as="p">
+                    {formatCurrency(calculateTotal())}
+                  </Text>
+                </InlineStack>
+                <Text variant="bodySm" tone="subdued">
+                  {selectedCategories.length} categories selected
                 </Text>
-              </InlineStack>
-            </BlockStack>
-          </Card>
-        </Layout.Section>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        )}
 
         {/* Action buttons at bottom */}
         <Layout.Section>
@@ -284,7 +308,7 @@ export default function CreateBudget() {
                 primary 
                 onClick={handleCreateBudget}
                 loading={isLoading}
-                disabled={!budgetName.trim()}
+                disabled={!budgetName.trim() || selectedCategories.length === 0}
               >
                 Create Budget
               </Button>
