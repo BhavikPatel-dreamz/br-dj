@@ -33,11 +33,10 @@ export const loader = async ({ request }) => {
   const page = parseInt(url.searchParams.get("page") || "1");
   const limit = parseInt(url.searchParams.get("limit") || "10");
   const search = url.searchParams.get("search") || "";
-  const category = url.searchParams.get("category") || "";
   const view = url.searchParams.get("view") || "budgets"; // budgets, create, assign
   const includeStats = url.searchParams.get("stats") === "true";
 
-  return json(await loadBudgetData({ page, limit, search, category, view, includeBudgetStats: includeStats }));
+  return json(await loadBudgetData({ page, limit, search, view, includeBudgetStats: includeStats }));
 };
 
 export const action = async ({ request }) => {
@@ -75,9 +74,8 @@ export default function BudgetManagement() {
   // State management
   const [selectedBudget, setSelectedBudget] = useState(null);
   const [modalActive, setModalActive] = useState(false);
-  const [modalType, setModalType] = useState(""); // create, edit, delete, assign
+  const [modalType, setModalType] = useState(""); // delete, assign
   const [searchValue, setSearchValue] = useState(filters.search);
-  const [categoryFilter, setCategoryFilter] = useState(filters.category);
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
 
@@ -86,7 +84,6 @@ export default function BudgetManagement() {
     name: "",
     description: "",
     amount: "",
-    category: "",
     period: "monthly",
     start_date: "",
     end_date: "",
@@ -96,7 +93,7 @@ export default function BudgetManagement() {
   const [assignmentData, setAssignmentData] = useState({
     budgetId: "",
     locationId: "",
-    allocationPercent: ""
+    assignedBy: ""
   });
 
   const isLoading = navigation.state === "submitting";
@@ -120,7 +117,6 @@ export default function BudgetManagement() {
       name: "",
       description: "",
       amount: "",
-      category: "",
       period: "monthly",
       start_date: "",
       end_date: "",
@@ -129,7 +125,7 @@ export default function BudgetManagement() {
     setAssignmentData({
       budgetId: "",
       locationId: "",
-      allocationPercent: ""
+      assignedBy: ""
     });
     setSelectedBudget(null);
   }, []);
@@ -147,20 +143,8 @@ export default function BudgetManagement() {
     setModalType(type);
     setModalActive(true);
     
-    if (budget && (type === "edit" || type === "delete")) {
+    if (budget && type === "delete") {
       setSelectedBudget(budget);
-      if (type === "edit") {
-        setFormData({
-          name: budget.name || "",
-          description: budget.description || "",
-          amount: budget.amount?.toString() || "",
-          category: budget.category || "",
-          period: budget.period || "monthly",
-          start_date: budget.start_date?.split('T')[0] || "",
-          end_date: budget.end_date?.split('T')[0] || "",
-          status: budget.status || "active"
-        });
-      }
     } else if (type === "assign") {
       setAssignmentData(prev => ({ ...prev, budgetId: budget?.id || "" }));
     } else {
@@ -202,29 +186,18 @@ export default function BudgetManagement() {
   const handleFilterChange = useCallback(() => {
     const params = new URLSearchParams();
     if (searchValue) params.set("search", searchValue);
-    if (categoryFilter && categoryFilter !== "") params.set("category", categoryFilter);
     params.set("page", "1");
     
     submit(params, { method: "get" });
-  }, [searchValue, categoryFilter, submit]);
+  }, [searchValue, submit]);
 
   const handlePagination = useCallback((page) => {
     const params = new URLSearchParams();
     params.set("page", page.toString());
     if (filters.search) params.set("search", filters.search);
-    if (filters.category && filters.category !== "") params.set("category", filters.category);
     
     submit(params, { method: "get" });
   }, [filters, submit]);
-
-  // Category options
-  const categoryOptions = [
-    { label: "All Categories", value: "" },
-    ...categories.map(cat => ({ 
-      label: cat.category_name || cat.name || cat, 
-      value: cat.category_name || cat.name || cat 
-    }))
-  ];
 
   const periodOptions = [
     { label: "Monthly", value: "monthly" },
@@ -247,7 +220,7 @@ export default function BudgetManagement() {
             heading="No budgets found"
             action={{
               content: "Create Budget",
-              url: "apps/br-dj/app/budget-management/create"
+              url: "/app/budget-create"
             }}
             image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
           >
@@ -259,7 +232,6 @@ export default function BudgetManagement() {
 
     const tableRows = budgets.map((budget) => [
       budget.name || "Unnamed",
-      budget.category || "Uncategorized",
       budget.amount ? `$${budget.amount.toLocaleString()}` : "$0",
       budget.period || "N/A",
       <Badge status={budget.status === "active" ? "success" : "attention"}>
@@ -268,7 +240,10 @@ export default function BudgetManagement() {
       budget.start_date ? new Date(budget.start_date).toLocaleDateString() : "N/A",
       budget.end_date ? new Date(budget.end_date).toLocaleDateString() : "N/A",
       <InlineStack align="end" gap="200">
-        <Button size="slim" onClick={() => handleModalToggle("edit", budget)}>
+        <Button 
+          size="slim" 
+          url={`/app/budget-create?id=${budget.id}`}
+        >
           Edit
         </Button>
         <Button size="slim" onClick={() => handleModalToggle("assign", budget)}>
@@ -289,7 +264,6 @@ export default function BudgetManagement() {
         <DataTable
           columnContentTypes={[
             'text',
-            'text', 
             'text',
             'text',
             'text',
@@ -299,7 +273,6 @@ export default function BudgetManagement() {
           ]}
           headings={[
             'Budget Name',
-            'Category', 
             'Amount',
             'Period',
             'Status',
@@ -315,7 +288,6 @@ export default function BudgetManagement() {
 
   const renderModal = () => {
     const modalTitle = {
-      edit: "Edit Budget",
       delete: "Delete Budget",
       assign: "Assign Budget to Location"
     }[modalType];
@@ -381,13 +353,11 @@ export default function BudgetManagement() {
                 onChange={(value) => handleAssignmentChange("locationId", value)}
               />
               <TextField
-                label="Allocation Percentage"
-                type="number"
-                value={assignmentData.allocationPercent}
-                onChange={(value) => handleAssignmentChange("allocationPercent", value)}
-                suffix="%"
-                min="0"
-                max="100"
+                label="Assigned By"
+                value={assignmentData.assignedBy}
+                onChange={(value) => handleAssignmentChange("assignedBy", value)}
+                placeholder="Enter who is making this assignment"
+                helpText="Leave empty for system assignment"
               />
             </FormLayout>
           </Modal.Section>
@@ -395,91 +365,8 @@ export default function BudgetManagement() {
       );
     }
 
-    return (
-      <Modal
-        large
-        open={modalActive}
-        onClose={() => handleModalToggle()}
-        title={modalTitle}
-        primaryAction={{
-          content: modalType === "create" ? "Create Budget" : "Update Budget",
-          loading: isLoading,
-          onAction: () => handleSubmit(modalType === "create" ? "create" : "update")
-        }}
-        secondaryActions={[
-          {
-            content: "Cancel",
-            onAction: () => handleModalToggle()
-          }
-        ]}
-      >
-        <Modal.Section>
-          <FormLayout>
-            <FormLayout.Group>
-              <TextField
-                label="Budget Name"
-                value={formData.name}
-                onChange={(value) => handleFormChange("name", value)}
-                placeholder="Enter budget name"
-              />
-              <Select
-                label="Category"
-                options={categoryOptions.slice(1)} // Remove "All Categories" option
-                value={formData.category}
-                onChange={(value) => handleFormChange("category", value)}
-              />
-            </FormLayout.Group>
-            
-            <TextField
-              label="Description"
-              value={formData.description}
-              onChange={(value) => handleFormChange("description", value)}
-              multiline={3}
-              placeholder="Enter budget description"
-            />
-            
-            <FormLayout.Group>
-              <TextField
-                label="Amount"
-                type="number"
-                value={formData.amount}
-                onChange={(value) => handleFormChange("amount", value)}
-                prefix="$"
-                placeholder="0.00"
-              />
-              <Select
-                label="Period"
-                options={periodOptions}
-                value={formData.period}
-                onChange={(value) => handleFormChange("period", value)}
-              />
-            </FormLayout.Group>
-            
-            <FormLayout.Group>
-              <TextField
-                label="Start Date"
-                type="date"
-                value={formData.start_date}
-                onChange={(value) => handleFormChange("start_date", value)}
-              />
-              <TextField
-                label="End Date"
-                type="date"
-                value={formData.end_date}
-                onChange={(value) => handleFormChange("end_date", value)}
-              />
-            </FormLayout.Group>
-            
-            <Select
-              label="Status"
-              options={statusOptions}
-              value={formData.status}
-              onChange={(value) => handleFormChange("status", value)}
-            />
-          </FormLayout>
-        </Modal.Section>
-      </Modal>
-    );
+    // No other modal types supported
+    return null;
   };
 
   return (
@@ -488,7 +375,7 @@ export default function BudgetManagement() {
       subtitle={`Managing ${totalBudgets} budget${totalBudgets !== 1 ? 's' : ''}`}
       primaryAction={{
         content: "Create Budget",
-        url: "/app/create"
+        url: "/app/budget-create"
       }}
     >
       {error && (
@@ -510,13 +397,6 @@ export default function BudgetManagement() {
                   clearButton
                   onClearButtonClick={() => setSearchValue("")}
                 />
-                <Select
-                  label="Filter by category (optional)"
-                  options={categoryOptions}
-                  value={categoryFilter}
-                  onChange={setCategoryFilter}
-                  helpText="Select 'All Categories' to view all budgets"
-                />
                 <div style={{ alignSelf: 'end' }}>
                   <InlineStack gap="200">
                     <Button onClick={handleFilterChange} loading={isLoading}>
@@ -525,12 +405,11 @@ export default function BudgetManagement() {
                     <Button 
                       onClick={() => {
                         setSearchValue("");
-                        setCategoryFilter("");
                         const params = new URLSearchParams();
                         params.set("page", "1");
                         submit(params, { method: "get" });
                       }}
-                      disabled={!searchValue && !categoryFilter}
+                      disabled={!searchValue}
                     >
                       Clear Filters
                     </Button>

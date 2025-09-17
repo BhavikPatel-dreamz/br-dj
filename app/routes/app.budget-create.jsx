@@ -1,5 +1,5 @@
 import { useNavigate, useSubmit, useNavigation, useActionData, useLoaderData } from "@remix-run/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { json, redirect } from "@remix-run/node";
 import {
   Page,
@@ -17,10 +17,13 @@ import {
 import { DeleteIcon } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server.js";
-import { createBudget, getBudgetCategories } from "../actions/index.server.js";
+import { createBudget, getBudgetCategories, getBudgetById, updateBudget } from "../actions/index.server.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
+  
+  const url = new URL(request.url);
+  const budgetId = url.searchParams.get("id");
   
   // Return the categories from database with full details
   const categories = await getBudgetCategories();
@@ -28,8 +31,20 @@ export const loader = async ({ request }) => {
   // Filter out any categories with null/undefined IDs
   const validCategories = categories.filter(cat => cat && cat.id != null);
   
+  let budgetData = null;
+  if (budgetId) {
+    try {
+      budgetData = await getBudgetById(budgetId);
+    } catch (error) {
+      console.error("Error loading budget for edit:", error);
+      // If budget doesn't exist, we'll treat it as create mode
+    }
+  }
+  
   return json({
-    categories: validCategories
+    categories: validCategories,
+    budgetData: budgetData,
+    isEditMode: !!budgetData
   });
 };
 
@@ -50,7 +65,19 @@ export const action = async ({ request }) => {
       const newBudget = await createBudget(budgetData);
       
       // Redirect back to the budget list after successful creation
-      return redirect("/");
+      return redirect("/app");
+    } else if (actionType === "update") {
+      const budgetId = formData.get("budgetId");
+      const budgetData = {
+        name: formData.get("name"),
+        description: formData.get("description"),
+        categories: JSON.parse(formData.get("categories") || "{}"),
+      };
+      
+      const updatedBudget = await updateBudget(budgetId, budgetData);
+      
+      // Redirect back to the budget list after successful update
+      return redirect("/app");
     }
 
     return json({ success: false, error: "Invalid action type" });
@@ -60,12 +87,12 @@ export const action = async ({ request }) => {
   }
 };
 
-export default function CreateBudget() {
+export default function BudgetForm() {
   const navigate = useNavigate();
   const submit = useSubmit();
   const navigation = useNavigation();
   const actionData = useActionData();
-  const { categories: availableCategories } = useLoaderData();
+  const { categories: availableCategories, budgetData, isEditMode } = useLoaderData();
 
   const [budgetName, setBudgetName] = useState("");
   const [budgetDescription, setBudgetDescription] = useState("");
@@ -75,8 +102,29 @@ export default function CreateBudget() {
 
   const isLoading = navigation.state === "submitting";
 
-  // Handle budget creation
-  const handleCreateBudget = () => {
+  // Populate form data when in edit mode
+  useEffect(() => {
+    if (isEditMode && budgetData) {
+      setBudgetName(budgetData.name || "");
+      setBudgetDescription(budgetData.description || "");
+      
+      // Convert categories object to budget rows
+      if (budgetData.categories) {
+        const rows = Object.entries(budgetData.categories).map(([categoryId, categoryData]) => ({
+          id: Date.now() + Math.random(), // Unique ID for each row
+          categoryId: categoryId.toString(),
+          amount: typeof categoryData === 'object' ? categoryData.amount : categoryData.toString()
+        }));
+        
+        if (rows.length > 0) {
+          setBudgetRows(rows);
+        }
+      }
+    }
+  }, [isEditMode, budgetData]);
+
+  // Handle budget creation and update
+  const handleSaveBudget = () => {
     if (!budgetName.trim()) return;
     
     const validRows = budgetRows.filter(row => row.categoryId && parseFloat(row.amount) > 0);
@@ -89,7 +137,10 @@ export default function CreateBudget() {
     });
 
     const formData = new FormData();
-    formData.append("actionType", "create");
+    formData.append("actionType", isEditMode ? "update" : "create");
+    if (isEditMode && budgetData?.id) {
+      formData.append("budgetId", budgetData.id);
+    }
     formData.append("name", budgetName);
     formData.append("description", budgetDescription);
     formData.append("categories", JSON.stringify(categoriesObject));
@@ -176,7 +227,7 @@ export default function CreateBudget() {
 
   return (
     <Page>
-      <TitleBar title="Create New Budget" />
+      <TitleBar title={isEditMode ? "Edit Budget" : "Create New Budget"} />
       
       <Layout>
         <Layout.Section>
@@ -190,11 +241,11 @@ export default function CreateBudget() {
                   </Button>
                   <Button 
                     primary 
-                    onClick={handleCreateBudget}
+                    onClick={handleSaveBudget}
                     loading={isLoading}
                     disabled={!isFormValid()}
                   >
-                    Create Budget
+                    {isEditMode ? "Update Budget" : "Create Budget"}
                   </Button>
                 </InlineStack>
               </InlineStack>
@@ -351,11 +402,11 @@ export default function CreateBudget() {
               </Button>
               <Button 
                 primary 
-                onClick={handleCreateBudget}
+                onClick={handleSaveBudget}
                 loading={isLoading}
                 disabled={!isFormValid()}
               >
-                Create Budget ({formatCurrency(calculateTotal())})
+                {isEditMode ? "Update Budget" : "Create Budget"} ({formatCurrency(calculateTotal())})
               </Button>
             </InlineStack>
           </Card>

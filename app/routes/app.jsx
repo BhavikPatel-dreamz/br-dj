@@ -18,11 +18,7 @@ export default function App() {
   const { apiKey } = useLoaderData();
 
   return (
-    <AppProvider isEmbeddedApp apiKey={apiKey}  linkComponent={({ children, url, ...rest }) => (
-        <Link to={url} {...rest}>
-          {children}
-        </Link>
-      )}>
+    <AppProvider isEmbeddedApp apiKey={apiKey} >
       <PolarisAppProvider i18n={{}} >
         <NavMenu>
           <Link to="/app" rel="home"> Home </Link>
