@@ -32,19 +32,73 @@ export const BUDGET_CATEGORIES = [
 ];
 
 /**
- * Get predefined budget categories
- * @returns {Array} Array of available budget categories
+ * Get budget categories from database with full details
+ * @returns {Array} Array of available budget categories from the database with id, name, parent_category, etc.
  */
-export function getBudgetCategories() {
-  return BUDGET_CATEGORIES;
+export async function getBudgetCategoriesFromDB() {
+  try {
+    const result = await mssql.query(`
+      SELECT 
+        id,
+        name,
+        parent_category,
+        description,
+        is_active,
+        created_at,
+        updated_at
+      FROM shopify.budget_categories_master 
+      WHERE is_active = 1
+      ORDER BY parent_category ASC, name ASC
+    `);
+
+    console.log('Database query result length:', Array.isArray(result) ? result.length : 'Not an array');
+    
+    // Check if result is directly an array or has recordset property
+    let categories = [];
+    if (Array.isArray(result)) {
+      categories = result;
+    } else if (result && result.recordset && Array.isArray(result.recordset)) {
+      categories = result.recordset;
+    } else {
+      console.warn('Unexpected result format, using fallback categories');
+      return BUDGET_CATEGORIES.map(name => ({ id: null, name, parent_category: name.split('>')[0] }));
+    }
+    
+    console.log(`✅ Loaded ${categories.length} categories from database`);
+    
+    return categories;
+  } catch (error) {
+    console.error('Error fetching categories from database:', error);
+    // Fallback to hardcoded categories if database fails
+    return BUDGET_CATEGORIES.map(name => ({ id: null, name, parent_category: name.split('>')[0] }));
+  }
 }
 
 /**
- * Validate budget categories
- * @param {Object} categories - Categories object to validate
+ * Get predefined budget categories (keeping for backward compatibility)
+ * @returns {Promise<Array>} Array of available budget categories with full details
+ */
+export async function getBudgetCategories() {
+  // Try to get from database first, fallback to hardcoded
+  return await getBudgetCategoriesFromDB();
+}
+
+/**
+ * Get simple category names for backward compatibility
+ * @returns {Promise<Array>} Array of category names only
+ */
+export async function getBudgetCategoryNames() {
+  const categories = await getBudgetCategoriesFromDB();
+  return categories.map(cat => cat.name);
+}
+
+/**
+ * Validate budget categories with support for both IDs and names
+ * @param {Object} categories - Categories object to validate (can use IDs or names as keys)
+ * @param {Array} validCategoriesData - Array of valid category objects from database
  * @returns {Object} Validation result with isValid and errors
  */
-export function validateBudgetCategories(categories) {
+export function validateBudgetCategories(categories, validCategoriesData = null) {
   const errors = [];
   const validCategories = {};
 
@@ -56,21 +110,58 @@ export function validateBudgetCategories(categories) {
     };
   }
 
-  for (const [category, value] of Object.entries(categories)) {
-    // Check if category is in predefined list
-    if (!BUDGET_CATEGORIES.includes(category)) {
-      errors.push(`Invalid category: ${category}`);
-      continue;
-    }
+  // If we don't have validCategoriesData, use fallback validation
+  if (!validCategoriesData) {
+    for (const [category, value] of Object.entries(categories)) {
+      // Check if category is in predefined list
+      if (!BUDGET_CATEGORIES.includes(category)) {
+        errors.push(`Invalid category: ${category}`);
+        continue;
+      }
 
-    // Validate value is a positive number
-    const numValue = parseFloat(value);
-    if (isNaN(numValue) || numValue < 0) {
-      errors.push(`Invalid value for ${category}: must be a positive number`);
-      continue;
-    }
+      // Validate value is a positive number
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue < 0) {
+        errors.push(`Invalid value for ${category}: must be a positive number`);
+        continue;
+      }
 
-    validCategories[category] = numValue.toString();
+      validCategories[category] = numValue.toString();
+    }
+  } else {
+    // Enhanced validation with database categories
+    const validCategoryIds = validCategoriesData.map(cat => cat.id.toString());
+    const validCategoryNames = validCategoriesData.map(cat => cat.name);
+    
+    for (const [categoryKey, value] of Object.entries(categories)) {
+      let categoryData = null;
+      
+      // Check if key is an ID or a name
+      if (validCategoryIds.includes(categoryKey.toString())) {
+        categoryData = validCategoriesData.find(cat => cat.id.toString() === categoryKey.toString());
+      } else if (validCategoryNames.includes(categoryKey)) {
+        categoryData = validCategoriesData.find(cat => cat.name === categoryKey);
+      }
+      
+      if (!categoryData) {
+        errors.push(`Invalid category: ${categoryKey}`);
+        continue;
+      }
+
+      // Validate value is a positive number
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue < 0) {
+        errors.push(`Invalid value for ${categoryData.name}: must be a positive number`);
+        continue;
+      }
+
+      // Store with category ID as key
+      validCategories[categoryData.id.toString()] = {
+        categoryId: categoryData.id,
+        categoryName: categoryData.name,
+        amount: numValue.toString()
+      };
+    }
   }
 
   return {
@@ -109,14 +200,26 @@ export async function getBudgets() {
     // Get categories for each budget
     for (const budget of budgets) {
       const categories = await mssql.query(`
-        SELECT category_name, allocated_amount, spent_amount, remaining_amount
-        FROM shopify.budget_categories
-        WHERE budget_id = @budgetId
-        ORDER BY category_name
+        SELECT 
+          bc.category_id,
+          bcm.name as category_name,
+          bcm.parent_category,
+          bc.allocated_amount, 
+          bc.spent_amount, 
+          bc.remaining_amount
+        FROM shopify.budget_categories bc
+        INNER JOIN shopify.budget_categories_master bcm ON bc.category_id = bcm.id
+        WHERE bc.budget_id = @budgetId
+        ORDER BY bcm.parent_category, bcm.name
       `, { budgetId: budget.id });
 
       budget.categories = categories.reduce((acc, cat) => {
-        acc[cat.category_name] = cat.allocated_amount.toString();
+        acc[cat.category_id] = {
+          categoryId: cat.category_id,
+          categoryName: cat.category_name,
+          parentCategory: cat.parent_category,
+          amount: cat.allocated_amount.toString()
+        };
         return acc;
       }, {});
       
@@ -134,7 +237,7 @@ export async function getBudgets() {
  * Create a new budget
  * @param {Object} budgetData - Budget data to create
  * @param {string} budgetData.name - Budget name
- * @param {Object} budgetData.categories - Categories with budget amounts
+ * @param {Object} budgetData.categories - Categories with budget amounts (can use IDs or names as keys)
  * @returns {Object} Created budget object
  */
 export async function createBudget(budgetData) {
@@ -149,15 +252,18 @@ export async function createBudget(budgetData) {
       throw new Error("Budget name must be a non-empty string");
     }
 
+    // Get valid categories from database for validation
+    const validCategoriesData = await getBudgetCategoriesFromDB();
+
     // Validate categories
-    const validation = validateBudgetCategories(budgetData.categories);
+    const validation = validateBudgetCategories(budgetData.categories, validCategoriesData);
     if (!validation.isValid) {
       throw new Error(`Invalid categories: ${validation.errors.join(', ')}`);
     }
 
     // Calculate total budget amount
     const totalAmount = Object.values(validation.validCategories)
-      .reduce((sum, value) => sum + parseFloat(value), 0);
+      .reduce((sum, categoryData) => sum + parseFloat(categoryData.amount || categoryData), 0);
 
     // Start database transaction
     const pool = await mssql.getPool();
@@ -181,15 +287,18 @@ export async function createBudget(budgetData) {
 
       const newBudget = budgetResult.recordset[0];
 
-      // Insert budget categories
-      for (const [categoryName, amount] of Object.entries(validation.validCategories)) {
+      // Insert budget categories using category IDs
+      for (const [categoryKey, categoryData] of Object.entries(validation.validCategories)) {
+        const categoryId = categoryData.categoryId || categoryKey;
+        const amount = parseFloat(categoryData.amount || categoryData);
+        
         await transaction.request()
           .input('budgetId', newBudget.id)
-          .input('categoryName', categoryName)
-          .input('allocatedAmount', parseFloat(amount))
+          .input('categoryId', categoryId)
+          .input('allocatedAmount', amount)
           .query(`
-            INSERT INTO shopify.budget_categories (budget_id, category_name, allocated_amount)
-            VALUES (@budgetId, @categoryName, @allocatedAmount)
+            INSERT INTO shopify.budget_categories (budget_id, category_id, allocated_amount)
+            VALUES (@budgetId, @categoryId, @allocatedAmount)
           `);
       }
 
@@ -240,15 +349,27 @@ export async function getBudgetById(budgetId) {
     }
 
     const categories = await mssql.query(`
-      SELECT category_name, allocated_amount, spent_amount, remaining_amount
-      FROM shopify.budget_categories
-      WHERE budget_id = @budgetId
-      ORDER BY category_name
+      SELECT 
+        bc.category_id,
+        bcm.name as category_name,
+        bcm.parent_category,
+        bc.allocated_amount, 
+        bc.spent_amount, 
+        bc.remaining_amount
+      FROM shopify.budget_categories bc
+      INNER JOIN shopify.budget_categories_master bcm ON bc.category_id = bcm.id
+      WHERE bc.budget_id = @budgetId
+      ORDER BY bcm.parent_category, bcm.name
     `, { budgetId });
 
     const budgetData = budget[0];
     budgetData.categories = categories.reduce((acc, cat) => {
-      acc[cat.category_name] = cat.allocated_amount.toString();
+      acc[cat.category_id] = {
+        categoryId: cat.category_id,
+        categoryName: cat.category_name,
+        parentCategory: cat.parent_category,
+        amount: cat.allocated_amount.toString()
+      };
       return acc;
     }, {});
     budgetData.categoryDetails = categories;
@@ -383,5 +504,170 @@ export async function getBudgetStats() {
   } catch (error) {
     console.error("Error fetching budget stats:", error);
     throw new Error(`Failed to fetch budget statistics: ${error.message}`);
+  }
+}
+
+/**
+ * Get available company locations from orders data
+ * @returns {Array} Array of location objects with id and name
+ */
+export async function getAvailableLocations() {
+  try {
+    const locations = await mssql.query(`
+      SELECT DISTINCT 
+        CAST(o.company_location_id AS NVARCHAR(255)) as company_location_id,
+        o.shipping_address_company,
+        o.shipping_address_city,
+        o.shipping_address_province,
+        COUNT(*) as order_count
+      FROM brdjdb.shopify.[order] AS o
+      WHERE o.company_location_id IS NOT NULL 
+        AND o.company_location_id != ''
+        AND CAST(o.company_location_id AS NVARCHAR(255)) != 'null'
+      GROUP BY 
+        CAST(o.company_location_id AS NVARCHAR(255)),
+        o.shipping_address_company,
+        o.shipping_address_city,
+        o.shipping_address_province
+      ORDER BY order_count DESC, company_location_id ASC
+    `);
+
+    return locations.map(location => ({
+      id: location.company_location_id,
+      name: `${location.company_location_id}${location.shipping_address_company ? ' - ' + location.shipping_address_company : ''}${location.shipping_address_city ? ', ' + location.shipping_address_city : ''}${location.shipping_address_province ? ', ' + location.shipping_address_province : ''}`,
+      company: location.shipping_address_company,
+      city: location.shipping_address_city,
+      province: location.shipping_address_province,
+      orderCount: location.order_count
+    }));
+  } catch (error) {
+    console.error("Error fetching available locations:", error);
+    throw new Error(`Failed to fetch available locations: ${error.message}`);
+  }
+}
+
+/**
+ * Create budget location assignment
+ * @param {Object} assignmentData - Assignment data
+ * @param {string|number} assignmentData.budgetId - Budget ID
+ * @param {string} assignmentData.locationId - Company location ID
+ * @param {string} assignmentData.assignedBy - User who made the assignment
+ * @returns {Object} Created assignment object
+ */
+export async function assignBudgetToLocation(assignmentData) {
+  try {
+    // Validate input
+    if (!assignmentData || !assignmentData.budgetId || !assignmentData.locationId) {
+      throw new Error("Budget ID and location ID are required");
+    }
+
+    // Check if budget exists
+    const budget = await getBudgetById(assignmentData.budgetId);
+    if (!budget) {
+      throw new Error("Budget not found");
+    }
+
+    // Check if assignment already exists
+    const existingAssignment = await mssql.query(`
+      SELECT * FROM shopify.budget_location_assignments 
+      WHERE budget_id = @budgetId AND location_id = @locationId
+    `, {
+      budgetId: assignmentData.budgetId,
+      locationId: assignmentData.locationId
+    });
+
+    if (existingAssignment && existingAssignment.length > 0) {
+      throw new Error("Budget is already assigned to this location");
+    }
+
+    // Create assignment
+    const result = await mssql.query(`
+      INSERT INTO shopify.budget_location_assignments (budget_id, location_id, assigned_by, status)
+      OUTPUT INSERTED.*
+      VALUES (@budgetId, @locationId, @assignedBy, 'active')
+    `, {
+      budgetId: assignmentData.budgetId,
+      locationId: assignmentData.locationId,
+      assignedBy: assignmentData.assignedBy || 'system'
+    });
+
+    return result[0];
+  } catch (error) {
+    console.error("Error assigning budget to location:", error);
+    throw new Error(`Failed to assign budget to location: ${error.message}`);
+  }
+}
+
+/**
+ * Get budget assignments for a location
+ * @param {string} locationId - Company location ID
+ * @returns {Array} Array of budget assignments
+ */
+export async function getBudgetAssignmentsByLocation(locationId) {
+  try {
+    const assignments = await mssql.query(`
+      SELECT 
+        ba.*,
+        b.name as budget_name,
+        b.total_amount,
+        b.status as budget_status
+      FROM shopify.budget_location_assignments ba
+      INNER JOIN shopify.budget b ON ba.budget_id = b.id
+      WHERE ba.location_id = @locationId
+        AND ba.status = 'active'
+      ORDER BY ba.created_at DESC
+    `, { locationId });
+
+    return assignments;
+  } catch (error) {
+    console.error("Error fetching budget assignments by location:", error);
+    throw new Error(`Failed to fetch budget assignments: ${error.message}`);
+  }
+}
+
+/**
+ * Get budget assignments for a budget
+ * @param {string|number} budgetId - Budget ID
+ * @returns {Array} Array of location assignments
+ */
+export async function getBudgetAssignmentsByBudget(budgetId) {
+  try {
+    const assignments = await mssql.query(`
+      SELECT ba.*, o.shipping_address_company, o.shipping_address_city, o.shipping_address_province
+      FROM shopify.budget_location_assignments ba
+      LEFT JOIN (
+        SELECT DISTINCT company_location_id, shipping_address_company, shipping_address_city, shipping_address_province
+        FROM brdjdb.shopify.[order]
+        WHERE company_location_id IS NOT NULL
+      ) o ON ba.location_id = o.company_location_id
+      WHERE ba.budget_id = @budgetId
+        AND ba.status = 'active'
+      ORDER BY ba.created_at DESC
+    `, { budgetId });
+
+    return assignments;
+  } catch (error) {
+    console.error("Error fetching budget assignments by budget:", error);
+    throw new Error(`Failed to fetch budget assignments: ${error.message}`);
+  }
+}
+
+/**
+ * Remove budget assignment
+ * @param {string|number} assignmentId - Assignment ID
+ * @returns {boolean} Success status
+ */
+export async function removeBudgetAssignment(assignmentId) {
+  try {
+    const result = await mssql.query(`
+      UPDATE shopify.budget_location_assignments 
+      SET status = 'inactive', updated_at = GETUTCDATE()
+      WHERE id = @assignmentId
+    `, { assignmentId });
+
+    return result.rowsAffected && result.rowsAffected[0] > 0;
+  } catch (error) {
+    console.error("Error removing budget assignment:", error);
+    throw new Error(`Failed to remove budget assignment: ${error.message}`);
   }
 }

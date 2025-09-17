@@ -29,8 +29,8 @@ export default function App() {
           <Link to="/app/products">Search products</Link>
           <Link to="/app/monthly-orders">Monthly Orders</Link>
           <Link to="/app/monthly-orders-by-category">Orders by Category</Link> */}
-          <Link to="/app/budget-management">Budget Management</Link>
-          
+          <Link to="/app/budget-categories">Categories Management</Link>
+
         </NavMenu>
         <Outlet />
       </PolarisAppProvider>

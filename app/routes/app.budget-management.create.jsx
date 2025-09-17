@@ -17,13 +17,13 @@ import {
 import { DeleteIcon } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server.js";
-import { createBudget, getBudgetCategories } from "../actions/fhr-budget.server.js";
+import { createBudget, getBudgetCategories } from "../actions/index.server";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
   
-  // Return the predefined categories for the frontend
-  const categories = getBudgetCategories();
+  // Return the categories from database with full details
+  const categories = await getBudgetCategories();
   
   return json({
     categories
@@ -66,6 +66,7 @@ export default function CreateBudget() {
   const [budgetName, setBudgetName] = useState("");
   const [selectedCategories, setSelectedCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [categorySearchTerm, setCategorySearchTerm] = useState("");
 
   const isLoading = navigation.state === "submitting";
 
@@ -73,11 +74,11 @@ export default function CreateBudget() {
   const handleCreateBudget = () => {
     if (!budgetName.trim() || selectedCategories.length === 0) return;
 
-    // Convert selected categories array to object format
+    // Convert selected categories array to object format using category IDs
     const categoriesObject = {};
     selectedCategories.forEach(item => {
       if (item.value && parseFloat(item.value) > 0) {
-        categoriesObject[item.category] = item.value;
+        categoriesObject[item.categoryId] = item.value;
       }
     });
 
@@ -96,13 +97,21 @@ export default function CreateBudget() {
 
   // Add a new category
   const addCategory = () => {
-    if (!selectedCategory || selectedCategories.find(item => item.category === selectedCategory)) {
+    if (!selectedCategory || selectedCategories.find(item => item.categoryId === selectedCategory)) {
       return;
     }
 
+    const categoryData = availableCategories.find(cat => cat.id.toString() === selectedCategory);
+    if (!categoryData) return;
+
     setSelectedCategories(prev => [
       ...prev,
-      { category: selectedCategory, value: "" }
+      { 
+        categoryId: categoryData.id,
+        categoryName: categoryData.name,
+        parentCategory: categoryData.parent_category,
+        value: "" 
+      }
     ]);
     setSelectedCategory("");
   };
@@ -123,10 +132,23 @@ export default function CreateBudget() {
 
   // Get available options for the dropdown (excluding already selected ones)
   const getAvailableOptions = () => {
-    const selectedCategoryNames = selectedCategories.map(item => item.category);
-    return availableCategories
-      .filter(category => !selectedCategoryNames.includes(category))
-      .map(category => ({ label: category, value: category }));
+    const selectedCategoryIds = selectedCategories.map(item => item.categoryId.toString());
+    let filtered = availableCategories
+      .filter(category => !selectedCategoryIds.includes(category.id.toString()));
+    
+    // Apply search filter if there's a search term
+    if (categorySearchTerm.trim()) {
+      const searchLower = categorySearchTerm.toLowerCase();
+      filtered = filtered.filter(category => 
+        category.name.toLowerCase().includes(searchLower) ||
+        category.parent_category.toLowerCase().includes(searchLower)
+      );
+    }
+    
+    return filtered.map(category => ({ 
+      label: `${category.parent_category} > ${category.name.split('>')[1] || category.name}`, 
+      value: category.id.toString() 
+    }));
   };
 
   // Format currency
@@ -148,7 +170,7 @@ export default function CreateBudget() {
   const groupCategoriesByDepartment = (categories) => {
     const groups = {};
     categories.forEach((item, index) => {
-      const department = item.category.split('>')[0];
+      const department = item.parentCategory || item.categoryName.split('>')[0];
       if (!groups[department]) {
         groups[department] = [];
       }
@@ -206,11 +228,20 @@ export default function CreateBudget() {
             <BlockStack gap="400">
               <Text variant="headingMd" as="h2">Add Categories</Text>
               <Text variant="bodySm" tone="subdued">
-                Select categories from the dropdown and assign budget amounts.
+                Select categories from the dropdown and assign budget amounts. Categories are grouped by department for better organization.
               </Text>
 
-              {/* Category Selection */}
+              {/* Category Selection with Search */}
               <FormLayout>
+                <TextField
+                  label="Search Categories"
+                  value={categorySearchTerm}
+                  onChange={setCategorySearchTerm}
+                  placeholder="Type to search categories..."
+                  autoComplete="off"
+                  clearButton
+                  onClearButtonClick={() => setCategorySearchTerm("")}
+                />
                 <InlineStack gap="300" align="end">
                   <div style={{ flex: 1 }}>
                     <Select
@@ -230,6 +261,11 @@ export default function CreateBudget() {
                     Add Category
                   </Button>
                 </InlineStack>
+                {categorySearchTerm && getAvailableOptions().length === 0 && (
+                  <Text variant="bodySm" tone="subdued">
+                    No categories match your search. Try a different search term.
+                  </Text>
+                )}
               </FormLayout>
             </BlockStack>
           </Card>
@@ -252,19 +288,20 @@ export default function CreateBudget() {
                           <InlineStack key={item.index} gap="200" align="end">
                             <div style={{ flex: 1 }}>
                               <TextField
-                                label={item.category.split('>')[1] || item.category}
+                                label={item.categoryName.split('>')[1] || item.categoryName}
                                 type="number"
                                 value={item.value}
                                 onChange={(newValue) => updateCategoryValue(item.index, newValue)}
                                 placeholder="0.00"
                                 prefix="$"
                                 autoComplete="off"
+                                helpText={`Category: ${item.categoryName}`}
                               />
                             </div>
                             <Button
                               icon={DeleteIcon}
                               onClick={() => removeCategory(item.index)}
-                              accessibilityLabel={`Remove ${item.category}`}
+                              accessibilityLabel={`Remove ${item.categoryName}`}
                             />
                           </InlineStack>
                         ))}

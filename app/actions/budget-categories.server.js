@@ -2,7 +2,6 @@
 // This file handles all CRUD operations for budget categories management
 
 import mssql from "../mssql.server.js";
-import { json, redirect } from "@remix-run/node";
 
 // Get all budget categories with optional pagination and filtering
 export async function getBudgetCategories(params = {}) {
@@ -17,7 +16,6 @@ export async function getBudgetCategories(params = {}) {
         } = params;
 
         let whereClause = '';
-        let searchParams = [];
 
         if (activeOnly) {
             whereClause = 'WHERE is_active = 1';
@@ -28,7 +26,6 @@ export async function getBudgetCategories(params = {}) {
                 ? ' AND (category_name LIKE @search OR description LIKE @search)'
                 : 'WHERE (category_name LIKE @search OR description LIKE @search)';
             whereClause += searchCondition;
-            searchParams.push({ name: 'search', type: mssql.NVarChar, value: `%${search}%` });
         }
 
         // Get total count for pagination
@@ -38,12 +35,9 @@ export async function getBudgetCategories(params = {}) {
             ${whereClause}
         `;
 
-        const countRequest = mssql.request();
-        searchParams.forEach(param => {
-            countRequest.input(param.name, param.type, param.value);
-        });
-        const countResult = await countRequest.query(countQuery);
-        const totalRecords = countResult.recordset[0].total;
+        const countParams = search && search.trim() ? { search: `%${search}%` } : {};
+        const countResult = await mssql.query(countQuery, countParams);
+        const totalRecords = countResult[0].total;
 
         // Get paginated data
         const offset = (page - 1) * limit;
@@ -53,8 +47,8 @@ export async function getBudgetCategories(params = {}) {
                 category_name,
                 category_code,
                 description,
-                is_active,
                 sort_order,
+                is_active,
                 created_at,
                 updated_at,
                 created_by,
@@ -66,18 +60,17 @@ export async function getBudgetCategories(params = {}) {
             FETCH NEXT @limit ROWS ONLY
         `;
 
-        const dataRequest = mssql.request();
-        searchParams.forEach(param => {
-            dataRequest.input(param.name, param.type, param.value);
-        });
-        dataRequest.input('offset', mssql.Int, offset);
-        dataRequest.input('limit', mssql.Int, limit);
+        const dataParams = {
+            offset: offset,
+            limit: limit,
+            ...(search && search.trim() ? { search: `%${search}%` } : {})
+        };
         
-        const dataResult = await dataRequest.query(dataQuery);
+        const dataResult = await mssql.query(dataQuery, dataParams);
 
         return {
             success: true,
-            data: dataResult.recordset,
+            data: dataResult,
             pagination: {
                 currentPage: parseInt(page),
                 pageSize: parseInt(limit),
@@ -87,14 +80,20 @@ export async function getBudgetCategories(params = {}) {
                 hasPrevious: page > 1
             }
         };
-
     } catch (error) {
         console.error('Error fetching budget categories:', error);
         return {
             success: false,
-            error: 'Failed to fetch budget categories: ' + error.message,
+            error: error.message || 'Failed to fetch budget categories',
             data: [],
-            pagination: null
+            pagination: {
+                currentPage: 1,
+                pageSize: limit || 20,
+                totalRecords: 0,
+                totalPages: 0,
+                hasNext: false,
+                hasPrevious: false
+            }
         };
     }
 }
@@ -102,43 +101,39 @@ export async function getBudgetCategories(params = {}) {
 // Get a single budget category by ID
 export async function getBudgetCategoryById(id) {
     try {
-        const request = mssql.request();
-        request.input('id', mssql.BigInt, id);
-
-        const result = await request.query(`
+        const result = await mssql.query(`
             SELECT 
                 id,
                 category_name,
                 category_code,
                 description,
-                is_active,
                 sort_order,
+                is_active,
                 created_at,
                 updated_at,
                 created_by,
                 updated_by
             FROM shopify.budget_categories_master 
             WHERE id = @id
-        `);
+        `, { id });
 
-        if (result.recordset.length === 0) {
+        if (result.length === 0) {
             return {
                 success: false,
-                error: 'Budget category not found',
+                error: 'Category not found',
                 data: null
             };
         }
 
         return {
             success: true,
-            data: result.recordset[0]
+            data: result[0]
         };
-
     } catch (error) {
         console.error('Error fetching budget category:', error);
         return {
             success: false,
-            error: 'Failed to fetch budget category: ' + error.message,
+            error: error.message || 'Failed to fetch budget category',
             data: null
         };
     }
@@ -147,16 +142,9 @@ export async function getBudgetCategoryById(id) {
 // Create a new budget category
 export async function createBudgetCategory(categoryData) {
     try {
-        const {
-            category_name,
-            category_code = null,
-            description = null,
-            sort_order = 0,
-            created_by = 'user'
-        } = categoryData;
+        const { category_name, category_code, description, sort_order, created_by } = categoryData;
 
-        // Validate required fields
-        if (!category_name || category_name.trim() === '') {
+        if (!category_name || !category_name.trim()) {
             return {
                 success: false,
                 error: 'Category name is required'
@@ -164,51 +152,45 @@ export async function createBudgetCategory(categoryData) {
         }
 
         // Check if category name already exists
-        const existingRequest = mssql.request();
-        existingRequest.input('category_name', mssql.NVarChar, category_name.trim());
-        
-        const existingResult = await existingRequest.query(`
-            SELECT id FROM shopify.budget_categories_master 
-            WHERE category_name = @category_name
-        `);
+        const existingResult = await mssql.query(`
+            SELECT COUNT(*) as count
+            FROM shopify.budget_categories_master 
+            WHERE category_name = @category_name AND is_active = 1
+        `, { category_name: category_name.trim() });
 
-        if (existingResult.recordset.length > 0) {
+        if (existingResult[0].count > 0) {
             return {
                 success: false,
                 error: 'A category with this name already exists'
             };
         }
 
-        // Insert new category
-        const request = mssql.request();
-        request.input('category_name', mssql.NVarChar, category_name.trim());
-        request.input('category_code', mssql.NVarChar, category_code?.trim() || null);
-        request.input('description', mssql.NVarChar, description?.trim() || null);
-        request.input('sort_order', mssql.Int, sort_order || 0);
-        request.input('created_by', mssql.NVarChar, created_by);
-
-        const result = await request.query(`
+        // Create the new category
+        const result = await mssql.query(`
             INSERT INTO shopify.budget_categories_master 
-                (category_name, category_code, description, sort_order, created_by, updated_by)
-            VALUES 
-                (@category_name, @category_code, @description, @sort_order, @created_by, @created_by);
-            
-            SELECT SCOPE_IDENTITY() as newId;
-        `);
-
-        const newId = result.recordset[0].newId;
+            (category_name, category_code, description, sort_order, created_by, is_active, created_at)
+            OUTPUT INSERTED.id, INSERTED.category_name, INSERTED.category_code, 
+                   INSERTED.description, INSERTED.sort_order, INSERTED.is_active,
+                   INSERTED.created_at, INSERTED.updated_at, INSERTED.created_by, INSERTED.updated_by
+            VALUES (@category_name, @category_code, @description, @sort_order, @created_by, 1, GETDATE())
+        `, {
+            category_name: category_name.trim(),
+            category_code: category_code?.trim() || null,
+            description: description?.trim() || null,
+            sort_order: sort_order || 0,
+            created_by: created_by
+        });
 
         return {
             success: true,
-            message: 'Budget category created successfully',
-            data: { id: newId }
+            data: result[0],
+            message: 'Category created successfully'
         };
-
     } catch (error) {
         console.error('Error creating budget category:', error);
         return {
             success: false,
-            error: 'Failed to create budget category: ' + error.message
+            error: error.message || 'Failed to create budget category'
         };
     }
 }
@@ -216,17 +198,16 @@ export async function createBudgetCategory(categoryData) {
 // Update an existing budget category
 export async function updateBudgetCategory(id, categoryData) {
     try {
-        const {
-            category_name,
-            category_code = null,
-            description = null,
-            sort_order = 0,
-            is_active = true,
-            updated_by = 'user'
-        } = categoryData;
+        const { category_name, category_code, description, sort_order, updated_by } = categoryData;
 
-        // Validate required fields
-        if (!category_name || category_name.trim() === '') {
+        if (!id) {
+            return {
+                success: false,
+                error: 'Category ID is required'
+            };
+        }
+
+        if (!category_name || !category_name.trim()) {
             return {
                 success: false,
                 error: 'Category name is required'
@@ -234,211 +215,158 @@ export async function updateBudgetCategory(id, categoryData) {
         }
 
         // Check if category exists
-        const existingRequest = mssql.request();
-        existingRequest.input('id', mssql.BigInt, id);
-        
-        const existingResult = await existingRequest.query(`
+        const existingResult = await mssql.query(`
             SELECT id FROM shopify.budget_categories_master WHERE id = @id
-        `);
+        `, { id });
 
-        if (existingResult.recordset.length === 0) {
+        if (existingResult.length === 0) {
             return {
                 success: false,
-                error: 'Budget category not found'
+                error: 'Category not found'
             };
         }
 
-        // Check if category name already exists (excluding current category)
-        const duplicateRequest = mssql.request();
-        duplicateRequest.input('category_name', mssql.NVarChar, category_name.trim());
-        duplicateRequest.input('id', mssql.BigInt, id);
-        
-        const duplicateResult = await duplicateRequest.query(`
-            SELECT id FROM shopify.budget_categories_master 
-            WHERE category_name = @category_name AND id != @id
-        `);
+        // Check for duplicate name (excluding current record)
+        const duplicateResult = await mssql.query(`
+            SELECT COUNT(*) as count
+            FROM shopify.budget_categories_master 
+            WHERE category_name = @category_name AND id != @id AND is_active = 1
+        `, { 
+            category_name: category_name.trim(), 
+            id: id 
+        });
 
-        if (duplicateResult.recordset.length > 0) {
+        if (duplicateResult[0].count > 0) {
             return {
                 success: false,
                 error: 'A category with this name already exists'
             };
         }
 
-        // Update category
-        const request = mssql.request();
-        request.input('id', mssql.BigInt, id);
-        request.input('category_name', mssql.NVarChar, category_name.trim());
-        request.input('category_code', mssql.NVarChar, category_code?.trim() || null);
-        request.input('description', mssql.NVarChar, description?.trim() || null);
-        request.input('sort_order', mssql.Int, sort_order || 0);
-        request.input('is_active', mssql.Bit, is_active);
-        request.input('updated_by', mssql.NVarChar, updated_by);
-
-        await request.query(`
+        // Update the category
+        const result = await mssql.query(`
             UPDATE shopify.budget_categories_master 
             SET 
                 category_name = @category_name,
                 category_code = @category_code,
                 description = @description,
                 sort_order = @sort_order,
-                is_active = @is_active,
                 updated_by = @updated_by,
-                updated_at = GETUTCDATE()
+                updated_at = GETDATE()
+            OUTPUT INSERTED.id, INSERTED.category_name, INSERTED.category_code, 
+                   INSERTED.description, INSERTED.sort_order, INSERTED.is_active,
+                   INSERTED.created_at, INSERTED.updated_at, INSERTED.created_by, INSERTED.updated_by
             WHERE id = @id
-        `);
+        `, {
+            id: id,
+            category_name: category_name.trim(),
+            category_code: category_code?.trim() || null,
+            description: description?.trim() || null,
+            sort_order: sort_order || 0,
+            updated_by: updated_by
+        });
 
         return {
             success: true,
-            message: 'Budget category updated successfully'
+            data: result[0],
+            message: 'Category updated successfully'
         };
-
     } catch (error) {
         console.error('Error updating budget category:', error);
         return {
             success: false,
-            error: 'Failed to update budget category: ' + error.message
+            error: error.message || 'Failed to update budget category'
         };
     }
 }
 
-// Soft delete a budget category (set is_active = false)
+// Delete (soft delete) a budget category
 export async function deleteBudgetCategory(id) {
     try {
-        // Check if category exists
-        const existingRequest = mssql.request();
-        existingRequest.input('id', mssql.BigInt, id);
-        
-        const existingResult = await existingRequest.query(`
-            SELECT id, category_name FROM shopify.budget_categories_master WHERE id = @id
-        `);
-
-        if (existingResult.recordset.length === 0) {
+        if (!id) {
             return {
                 success: false,
-                error: 'Budget category not found'
+                error: 'Category ID is required'
             };
         }
 
-        // Check if category is used in any budgets
-        const usageRequest = mssql.request();
-        usageRequest.input('category_name', mssql.NVarChar, existingResult.recordset[0].category_name);
-        
-        const usageResult = await usageRequest.query(`
-            SELECT COUNT(*) as usage_count 
-            FROM shopify.budget_categories bc
-            WHERE bc.category = @category_name
-        `);
+        // Check if category exists and is active
+        const existingResult = await mssql.query(`
+            SELECT id, category_name FROM shopify.budget_categories_master 
+            WHERE id = @id AND is_active = 1
+        `, { id });
 
-        if (usageResult.recordset[0].usage_count > 0) {
+        if (existingResult.length === 0) {
             return {
                 success: false,
-                error: 'Cannot delete category that is currently used in budget allocations. Please remove it from all budgets first.'
+                error: 'Category not found or already deleted'
             };
         }
 
-        // Soft delete (set is_active = false)
-        const deleteRequest = mssql.request();
-        deleteRequest.input('id', mssql.BigInt, id);
-        deleteRequest.input('updated_by', mssql.NVarChar, 'user');
+        // Check if category is being used in any budgets
+        const usageResult = await mssql.query(`
+            SELECT COUNT(*) as count
+            FROM shopify.budget 
+            WHERE category = @category_name AND status = 'active'
+        `, { category_name: existingResult[0].category_name });
 
-        await deleteRequest.query(`
+        if (usageResult[0].count > 0) {
+            return {
+                success: false,
+                error: 'Cannot delete category that is currently being used in active budgets'
+            };
+        }
+
+        // Soft delete the category
+        await mssql.query(`
             UPDATE shopify.budget_categories_master 
-            SET 
-                is_active = 0,
-                updated_by = @updated_by,
-                updated_at = GETUTCDATE()
+            SET is_active = 0, updated_at = GETDATE()
             WHERE id = @id
-        `);
+        `, { id });
 
         return {
             success: true,
-            message: 'Budget category deleted successfully'
+            message: 'Category deleted successfully'
         };
-
     } catch (error) {
         console.error('Error deleting budget category:', error);
         return {
             success: false,
-            error: 'Failed to delete budget category: ' + error.message
+            error: error.message || 'Failed to delete budget category'
         };
     }
 }
 
-// Get all active categories for dropdowns/select lists
-export async function getActiveBudgetCategories() {
+// Get categories for dropdown/select options
+export async function getBudgetCategoryOptions() {
     try {
         const result = await mssql.query(`
             SELECT 
                 id,
                 category_name,
-                category_code,
-                description,
-                sort_order
+                category_code
             FROM shopify.budget_categories_master 
             WHERE is_active = 1
             ORDER BY sort_order ASC, category_name ASC
         `);
 
+        const options = result.map(category => ({
+            label: category.category_name,
+            value: category.category_name,
+            id: category.id,
+            code: category.category_code
+        }));
+
         return {
             success: true,
-            data: result.recordset
+            data: options
         };
-
     } catch (error) {
-        console.error('Error fetching active budget categories:', error);
+        console.error('Error fetching budget category options:', error);
         return {
             success: false,
-            error: 'Failed to fetch active budget categories: ' + error.message,
+            error: error.message || 'Failed to fetch budget category options',
             data: []
-        };
-    }
-}
-
-// Bulk update sort order for categories
-export async function updateCategoriesSortOrder(categoryIds, sortOrders) {
-    try {
-        if (!Array.isArray(categoryIds) || !Array.isArray(sortOrders) || categoryIds.length !== sortOrders.length) {
-            return {
-                success: false,
-                error: 'Invalid parameters for bulk sort order update'
-            };
-        }
-
-        // Use transaction for bulk update
-        const transaction = new mssql.Transaction();
-        await transaction.begin();
-
-        try {
-            for (let i = 0; i < categoryIds.length; i++) {
-                const request = new mssql.Request(transaction);
-                request.input('id', mssql.BigInt, categoryIds[i]);
-                request.input('sort_order', mssql.Int, sortOrders[i]);
-
-                await request.query(`
-                    UPDATE shopify.budget_categories_master 
-                    SET sort_order = @sort_order, updated_at = GETUTCDATE()
-                    WHERE id = @id
-                `);
-            }
-
-            await transaction.commit();
-
-            return {
-                success: true,
-                message: 'Sort order updated successfully'
-            };
-
-        } catch (error) {
-            await transaction.rollback();
-            throw error;
-        }
-
-    } catch (error) {
-        console.error('Error updating categories sort order:', error);
-        return {
-            success: false,
-            error: 'Failed to update sort order: ' + error.message
         };
     }
 }

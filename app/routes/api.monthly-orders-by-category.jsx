@@ -5,7 +5,7 @@ import {
   validateShopifyProxyRequest,
   createSecureProxyResponse,
 } from "../utils/shopify-security.server.js";
-import { getMonthlyOrderProductsByCategoryWithRefunds } from "../actions/fhr-orders-refunds.server.js";
+import { getMonthlyOrderProductsByCategoryWithRefunds } from "../actions/index.server.js";
 
 
 /**
