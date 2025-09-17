@@ -17,7 +17,7 @@ import {
 import { DeleteIcon } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server.js";
-import { createBudget, getBudgetCategories } from "../actions/index.server";
+import { createBudget, getBudgetCategories } from "../actions/index.server.js";
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
@@ -50,7 +50,7 @@ export const action = async ({ request }) => {
       const newBudget = await createBudget(budgetData);
       
       // Redirect back to the budget list after successful creation
-      return redirect("/app/budget-management");
+      return redirect("/");
     }
 
     return json({ success: false, error: "Invalid action type" });
@@ -99,7 +99,7 @@ export default function CreateBudget() {
 
   // Handle cancel - go back to budget list
   const handleCancel = () => {
-    navigate("/app/budget-management");
+    navigate("/app");
   };
 
   // Add a new row

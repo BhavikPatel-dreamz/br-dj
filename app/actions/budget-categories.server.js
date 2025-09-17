@@ -305,12 +305,13 @@ export async function deleteBudgetCategory(id) {
             };
         }
 
-        // Check if category is being used in any budgets
+        // Check if category is being used in any active budgets
         const usageResult = await mssql.query(`
             SELECT COUNT(*) as count
-            FROM shopify.budget 
-            WHERE category = @category_name AND status = 'active'
-        `, { category_name: existingResult[0].category_name });
+            FROM shopify.budget_categories bc
+            INNER JOIN shopify.budget b ON bc.budget_id = b.id
+            WHERE bc.category_id = @category_id AND b.status = 'active'
+        `, { category_id: existingResult[0].id });
 
         if (usageResult[0].count > 0) {
             return {

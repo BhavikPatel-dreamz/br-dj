@@ -1,35 +1,41 @@
 // Server-only budget management functions
 import { 
   createBudget, 
+  createSimpleBudget,
   getBudgets, 
+  getSimpleBudgets,
   updateBudget, 
+  updateSimpleBudget,
   deleteBudget, 
   getBudgetCategories, 
   getAvailableLocations,
   assignBudgetToLocation,
   getBudgetAssignmentsByLocation,
-  getBudgetAssignmentsByBudget 
-} from "./fhr-budget.server";
+  getBudgetAssignmentsByBudget,
+  getBudgetStats 
+} from "./fhr-budget.server.js";
 
-export async function loadBudgetData({ page, limit, search, category, view }) {
+export async function loadBudgetData({ page, limit, search, category, view, includeBudgetStats = false }) {
   try {
-    const budgets = await getBudgets();
+    const budgets = await getSimpleBudgets();
     const categories = await getBudgetCategories();
     const locations = await getAvailableLocations();
+    // Get budget stats if requested
+    const budgetStats = includeBudgetStats ? await getBudgetStats() : null;
     // For now, we'll skip assignments until we implement a proper function
     const assignments = [];
 
     // Apply client-side filtering for now
     let filteredBudgets = budgets || [];
     
-    if (search) {
+    if (search && search.trim() !== "") {
       filteredBudgets = filteredBudgets.filter(budget => 
         budget.name?.toLowerCase().includes(search.toLowerCase()) ||
         budget.description?.toLowerCase().includes(search.toLowerCase())
       );
     }
     
-    if (category) {
+    if (category && category.trim() !== "") {
       filteredBudgets = filteredBudgets.filter(budget => 
         budget.category === category
       );
@@ -48,6 +54,7 @@ export async function loadBudgetData({ page, limit, search, category, view }) {
       categories: categories || [],
       locations: locations || [],
       assignments: assignments || [],
+      budgetStats: budgetStats,
       filters: { search, category },
       view
     };
@@ -61,9 +68,69 @@ export async function loadBudgetData({ page, limit, search, category, view }) {
       categories: [],
       locations: [],
       assignments: [],
+      budgetStats: null,
       filters: { search: "", category: "" },
       view,
       error: "Failed to load budget data"
+    };
+  }
+}
+
+// Additional fetch option functions for more granular data loading
+export async function loadBudgetSummaryData() {
+  try {
+    const budgetStats = await getBudgetStats();
+    const totalBudgets = await getBudgets().then(budgets => budgets?.length || 0);
+    const categories = await getBudgetCategories();
+    
+    return {
+      budgetStats,
+      totalBudgets,
+      totalCategories: categories?.length || 0,
+      success: true
+    };
+  } catch (error) {
+    console.error("Error loading budget summary:", error);
+    return {
+      budgetStats: null,
+      totalBudgets: 0,
+      totalCategories: 0,
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+export async function loadBudgetCategories() {
+  try {
+    const categories = await getBudgetCategories();
+    return {
+      categories: categories || [],
+      success: true
+    };
+  } catch (error) {
+    console.error("Error loading budget categories:", error);
+    return {
+      categories: [],
+      success: false,
+      error: error.message
+    };
+  }
+}
+
+export async function loadBudgetLocations() {
+  try {
+    const locations = await getAvailableLocations();
+    return {
+      locations: locations || [],
+      success: true
+    };
+  } catch (error) {
+    console.error("Error loading locations:", error);
+    return {
+      locations: [],
+      success: false,
+      error: error.message
     };
   }
 }
@@ -83,9 +150,9 @@ export async function handleBudgetAction({ intent, formData }) {
           status: formData.get("status") || "active"
         };
 
-        const result = await createBudget(budgetData);
+        const result = await createSimpleBudget(budgetData);
         if (result.success) {
-          return { success: "Budget created successfully", redirect: "/app/budget-management?view=budgets&success=Budget created successfully" };
+          return { success: "Budget created successfully" };
         }
         return { error: result.error || "Failed to create budget" };
       }
@@ -103,7 +170,7 @@ export async function handleBudgetAction({ intent, formData }) {
           status: formData.get("status")
         };
 
-        const result = await updateBudget(id, budgetData);
+        const result = await updateSimpleBudget(id, budgetData);
         if (result.success) {
           return { success: "Budget updated successfully" };
         }

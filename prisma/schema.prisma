@@ -9,12 +9,12 @@ generator client {
 // enough when changing adapters.
 // See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
-  provider = "mongodb"
+  provider = "sqlserver"
   url      = env("DATABASE_URL")
 }
 
 model Session {
-  id            String    @id @map("_id")
+  id            String    @id @default(cuid())
   shop          String
   state         String
   isOnline      Boolean   @default(false)
@@ -29,4 +29,8 @@ model Session {
   locale        String?
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@map("sessions")
 }

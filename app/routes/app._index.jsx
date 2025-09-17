@@ -35,8 +35,9 @@ export const loader = async ({ request }) => {
   const search = url.searchParams.get("search") || "";
   const category = url.searchParams.get("category") || "";
   const view = url.searchParams.get("view") || "budgets"; // budgets, create, assign
+  const includeStats = url.searchParams.get("stats") === "true";
 
-  return json(await loadBudgetData({ page, limit, search, category, view }));
+  return json(await loadBudgetData({ page, limit, search, category, view, includeBudgetStats: includeStats }));
 };
 
 export const action = async ({ request }) => {
@@ -61,6 +62,7 @@ export default function BudgetManagement() {
     categories, 
     locations, 
     assignments, 
+    budgetStats,
     filters, 
     view,
     error 
@@ -200,7 +202,7 @@ export default function BudgetManagement() {
   const handleFilterChange = useCallback(() => {
     const params = new URLSearchParams();
     if (searchValue) params.set("search", searchValue);
-    if (categoryFilter) params.set("category", categoryFilter);
+    if (categoryFilter && categoryFilter !== "") params.set("category", categoryFilter);
     params.set("page", "1");
     
     submit(params, { method: "get" });
@@ -210,7 +212,7 @@ export default function BudgetManagement() {
     const params = new URLSearchParams();
     params.set("page", page.toString());
     if (filters.search) params.set("search", filters.search);
-    if (filters.category) params.set("category", filters.category);
+    if (filters.category && filters.category !== "") params.set("category", filters.category);
     
     submit(params, { method: "get" });
   }, [filters, submit]);
@@ -245,7 +247,7 @@ export default function BudgetManagement() {
             heading="No budgets found"
             action={{
               content: "Create Budget",
-              onAction: () => handleModalToggle("create")
+              url: "apps/br-dj/app/budget-management/create"
             }}
             image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
           >
@@ -313,7 +315,6 @@ export default function BudgetManagement() {
 
   const renderModal = () => {
     const modalTitle = {
-      create: "Create New Budget",
       edit: "Edit Budget",
       delete: "Delete Budget",
       assign: "Assign Budget to Location"
@@ -487,7 +488,7 @@ export default function BudgetManagement() {
       subtitle={`Managing ${totalBudgets} budget${totalBudgets !== 1 ? 's' : ''}`}
       primaryAction={{
         content: "Create Budget",
-        onAction: () => handleModalToggle("create")
+        url: "/app/create"
       }}
     >
       {error && (
@@ -510,15 +511,30 @@ export default function BudgetManagement() {
                   onClearButtonClick={() => setSearchValue("")}
                 />
                 <Select
-                  label="Filter by category"
+                  label="Filter by category (optional)"
                   options={categoryOptions}
                   value={categoryFilter}
                   onChange={setCategoryFilter}
+                  helpText="Select 'All Categories' to view all budgets"
                 />
                 <div style={{ alignSelf: 'end' }}>
-                  <Button onClick={handleFilterChange} loading={isLoading}>
-                    Apply Filters
-                  </Button>
+                  <InlineStack gap="200">
+                    <Button onClick={handleFilterChange} loading={isLoading}>
+                      Apply Filters
+                    </Button>
+                    <Button 
+                      onClick={() => {
+                        setSearchValue("");
+                        setCategoryFilter("");
+                        const params = new URLSearchParams();
+                        params.set("page", "1");
+                        submit(params, { method: "get" });
+                      }}
+                      disabled={!searchValue && !categoryFilter}
+                    >
+                      Clear Filters
+                    </Button>
+                  </InlineStack>
                 </div>
               </FormLayout.Group>
             </FormLayout>

@@ -18,18 +18,17 @@ export default function App() {
   const { apiKey } = useLoaderData();
 
   return (
-    <AppProvider isEmbeddedApp apiKey={apiKey}>
-      <PolarisAppProvider i18n={{}}>
+    <AppProvider isEmbeddedApp apiKey={apiKey}  linkComponent={({ children, url, ...rest }) => (
+        <Link to={url} {...rest}>
+          {children}
+        </Link>
+      )}>
+      <PolarisAppProvider i18n={{}} >
         <NavMenu>
-          <Link to="/app" rel="home">
-            Home
-          </Link>
-          
-          {/* <Link to="/app/search">Search orders</Link>
-          <Link to="/app/products">Search products</Link>
-          <Link to="/app/monthly-orders">Monthly Orders</Link>
-          <Link to="/app/monthly-orders-by-category">Orders by Category</Link> */}
-          <Link to="/app/budget-categories">Categories Management</Link>
+          <Link to="/app" rel="home"> Home </Link>
+          <Link to="/app/budget-create" rel="create Budget">Create Budget</Link>
+          <Link to="/app/budget-categories" rel="manage Categories">Categories Management</Link>
+          <Link to="/app/budget-location-assignments" rel="budget assignments">Budget Location Assignments</Link>
 
         </NavMenu>
         <Outlet />

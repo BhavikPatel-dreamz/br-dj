@@ -1,5 +1,5 @@
-import './app/mssql.server.js';
-import { createBudgetCategory } from './app/actions/budget-categories.server.js';
+import '../app/mssql.server.js';
+import { createBudgetCategory } from '../app/actions/budget-categories.server.js';
 
 async function testCreate() {
   try {
