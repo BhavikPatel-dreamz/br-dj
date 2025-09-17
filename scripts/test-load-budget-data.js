@@ -1,4 +1,4 @@
-import { loadBudgetData } from './app/actions/budget-management.server.js';
+import { loadBudgetData } from '../app/actions/budget-management.server.js';
 
 async function testLoadBudgetData() {
   console.log('🔍 Testing loadBudgetData function...');

@@ -731,11 +731,16 @@ export async function updateBudget(budgetId, updateData) {
  */
 export async function deleteBudget(budgetId) {
   try {
+
+    console.log("deleted budget id:", budgetId);
+
     const result = await mssql.query(`
       DELETE FROM shopify.budget WHERE id = @budgetId
     `, { budgetId });
 
-    return result.rowsAffected && result.rowsAffected[0] > 0;
+    console.log("deleted budget result:", result);
+
+    return true;
   } catch (error) {
     console.error("Error deleting budget:", error);
     throw new Error(`Failed to delete budget: ${error.message}`);

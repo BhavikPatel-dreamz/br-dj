@@ -1,4 +1,4 @@
-import { getSimpleBudgets, getBudgetCategories, getAvailableLocations, getBudgetStats } from './app/actions/fhr-budget.server.js';
+import { getSimpleBudgets, getBudgetCategories, getAvailableLocations, getBudgetStats } from '../app/actions/fhr-budget.server.js';
 
 async function testSimpleBudgetFunctions() {
   console.log('🔍 Testing updated budget functions...');

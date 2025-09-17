@@ -189,12 +189,12 @@ export async function handleBudgetAction({ intent, formData }) {
       case "assign": {
         const budgetId = formData.get("budgetId");
         const locationId = formData.get("locationId");
-        const allocationPercent = parseFloat(formData.get("allocationPercent"));
+        const assignedBy = formData.get("assignedBy");
 
         const result = await assignBudgetToLocation({
           budgetId,
           locationId,
-          allocationPercent
+          assignedBy
         });
         if (result.success) {
           return { success: "Budget assigned to location successfully" };
