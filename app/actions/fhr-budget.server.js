@@ -61,7 +61,11 @@ export async function getBudgetCategoriesFromDB() {
       categories = result.recordset;
     } else {
       console.warn('Unexpected result format, using fallback categories');
-      return BUDGET_CATEGORIES.map(name => ({ id: null, name, parent_category: name.split('>')[0] }));
+      return BUDGET_CATEGORIES.map((name, index) => ({ 
+        id: index + 1, // Give fallback categories proper IDs
+        name, 
+        parent_category: name.split('>')[0] 
+      }));
     }
     
     console.log(`✅ Loaded ${categories.length} categories from database`);
@@ -70,7 +74,11 @@ export async function getBudgetCategoriesFromDB() {
   } catch (error) {
     console.error('Error fetching categories from database:', error);
     // Fallback to hardcoded categories if database fails
-    return BUDGET_CATEGORIES.map(name => ({ id: null, name, parent_category: name.split('>')[0] }));
+    return BUDGET_CATEGORIES.map((name, index) => ({ 
+      id: index + 1000, // Use a different range for error fallback 
+      name, 
+      parent_category: name.split('>')[0] 
+    }));
   }
 }
 

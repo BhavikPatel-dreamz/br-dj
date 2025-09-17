@@ -1,5 +1,6 @@
 -- Create Budget Table for BRDJ Budget Management
 -- Database: brdjdb.shopify.budget
+-- PREREQUISITE: shopify.budget_categories_master table must exist (run create-budget-categories-master.sql first)
 
 USE brdjdb;
 GO
@@ -43,22 +44,23 @@ GO
 CREATE TABLE shopify.budget_categories (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     budget_id BIGINT NOT NULL,
-    category_name NVARCHAR(255) NOT NULL,
+    category_id BIGINT NOT NULL,
     allocated_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
     spent_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
     remaining_amount AS (allocated_amount - spent_amount) PERSISTED,
     created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
     updated_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
     
-    -- Foreign key constraint
+    -- Foreign key constraints
     CONSTRAINT FK_budget_categories_budget_id FOREIGN KEY (budget_id) REFERENCES shopify.budget(id) ON DELETE CASCADE,
+    CONSTRAINT FK_budget_categories_category_id FOREIGN KEY (category_id) REFERENCES shopify.budget_categories_master(id),
     
     -- Check constraints
     CONSTRAINT CK_budget_categories_allocated_amount CHECK (allocated_amount >= 0),
     CONSTRAINT CK_budget_categories_spent_amount CHECK (spent_amount >= 0),
     
     -- Unique constraint
-    CONSTRAINT UQ_budget_categories_budget_category UNIQUE (budget_id, category_name)
+    CONSTRAINT UQ_budget_categories_budget_category UNIQUE (budget_id, category_id)
 );
 GO
 
@@ -67,7 +69,7 @@ CREATE INDEX IX_budget_status ON shopify.budget(status);
 CREATE INDEX IX_budget_fiscal_year ON shopify.budget(fiscal_year);
 CREATE INDEX IX_budget_created_at ON shopify.budget(created_at);
 CREATE INDEX IX_budget_categories_budget_id ON shopify.budget_categories(budget_id);
-CREATE INDEX IX_budget_categories_category_name ON shopify.budget_categories(category_name);
+CREATE INDEX IX_budget_categories_category_id ON shopify.budget_categories(category_id);
 GO
 
 -- Create trigger to update updated_at timestamp
@@ -127,30 +129,46 @@ VALUES
     ('Housekeeping & Maintenance Budget Q4', 'Operational budget for housekeeping and maintenance supplies', 2024, 'Q4', 'system');
 GO
 
--- Insert sample budget categories
+-- Insert sample budget categories using category IDs from master table
 DECLARE @budget1_id BIGINT = (SELECT id FROM shopify.budget WHERE name = 'Q4 2024 Medical Supplies Budget');
 DECLARE @budget2_id BIGINT = (SELECT id FROM shopify.budget WHERE name = 'Annual Capital Equipment Budget 2024');
 DECLARE @budget3_id BIGINT = (SELECT id FROM shopify.budget WHERE name = 'Housekeeping & Maintenance Budget Q4');
 
-INSERT INTO shopify.budget_categories (budget_id, category_name, allocated_amount)
+-- Get category IDs from master table
+DECLARE @medicalSuppliesId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Gen Nsg>Medical Supplies');
+DECLARE @incontinentId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Gen Nsg>Incontinent Supplies');
+DECLARE @woundCareId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Gen Nsg>Wound Care');
+DECLARE @personalCareId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Gen Nsg>Personal Care');
+
+DECLARE @fixedEquipId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Capital>Fixed Equip');
+DECLARE @majorMoveableId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Capital>Major Moveable Equip');
+DECLARE @leaseholdId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Capital>Leasehold Improvements');
+DECLARE @minorCapitalId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Capital>Minor Equip');
+
+DECLARE @hkMinorEquipId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Housekeeping>Minor Equip');
+DECLARE @hkSuppliesId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Housekeeping>Supplies');
+DECLARE @maintSuppliesId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Maintenance>Supplies');
+DECLARE @maintMinorEquipId BIGINT = (SELECT id FROM shopify.budget_categories_master WHERE category_name = 'Maintenance>Minor Equip');
+
+INSERT INTO shopify.budget_categories (budget_id, category_id, allocated_amount)
 VALUES 
     -- Medical Supplies Budget
-    (@budget1_id, 'Gen Nsg>Medical Supplies', 15000.00),
-    (@budget1_id, 'Gen Nsg>Incontinent Supplies', 8000.00),
-    (@budget1_id, 'Gen Nsg>Wound Care', 5000.00),
-    (@budget1_id, 'Gen Nsg>Personal Care', 3000.00),
+    (@budget1_id, @medicalSuppliesId, 15000.00),
+    (@budget1_id, @incontinentId, 8000.00),
+    (@budget1_id, @woundCareId, 5000.00),
+    (@budget1_id, @personalCareId, 3000.00),
     
     -- Capital Equipment Budget
-    (@budget2_id, 'Capital>Fixed Equip', 50000.00),
-    (@budget2_id, 'Capital>Major Moveable Equip', 25000.00),
-    (@budget2_id, 'Capital>Leasehold Improvements', 15000.00),
-    (@budget2_id, 'Capital>Minor Equip', 10000.00),
+    (@budget2_id, @fixedEquipId, 50000.00),
+    (@budget2_id, @majorMoveableId, 25000.00),
+    (@budget2_id, @leaseholdId, 15000.00),
+    (@budget2_id, @minorCapitalId, 10000.00),
     
     -- Housekeeping & Maintenance Budget
-    (@budget3_id, 'Housekeeping>Minor Equip', 3000.00),
-    (@budget3_id, 'Housekeeping>Supplies', 8000.00),
-    (@budget3_id, 'Maintenance>Supplies', 6000.00),
-    (@budget3_id, 'Maintenance>Minor Equip', 4000.00);
+    (@budget3_id, @hkMinorEquipId, 3000.00),
+    (@budget3_id, @hkSuppliesId, 8000.00),
+    (@budget3_id, @maintSuppliesId, 6000.00),
+    (@budget3_id, @maintMinorEquipId, 4000.00);
 GO
 
 -- Create views for easier querying
@@ -184,7 +202,10 @@ SELECT
     b.id as budget_id,
     b.name as budget_name,
     bc.id as category_id,
-    bc.category_name,
+    bc.category_id as master_category_id,
+    bcm.category_name,
+    bcm.category_code,
+    bcm.parent_category,
     bc.allocated_amount,
     bc.spent_amount,
     bc.remaining_amount,
@@ -195,7 +216,8 @@ SELECT
     bc.created_at as category_created_at,
     bc.updated_at as category_updated_at
 FROM shopify.budget b
-INNER JOIN shopify.budget_categories bc ON b.id = bc.budget_id;
+INNER JOIN shopify.budget_categories bc ON b.id = bc.budget_id
+INNER JOIN shopify.budget_categories_master bcm ON bc.category_id = bcm.id;
 GO
 
 -- Grant permissions (adjust as needed for your security requirements)

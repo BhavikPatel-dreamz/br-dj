@@ -1,5 +1,11 @@
 import { json } from "@remix-run/node";
-import { useLoaderData, useActionData, useNavigation, useSearchParams, Form } from "@remix-run/react";
+import {
+  useLoaderData,
+  useActionData,
+  useNavigation,
+  useSearchParams,
+  Form,
+} from "@remix-run/react";
 import { useState, useEffect } from "react";
 import {
   Page,
@@ -20,15 +26,18 @@ import {
   EmptySearchResult,
   EmptyState,
   Tooltip,
-  ButtonGroup
+  ButtonGroup,
+  Checkbox,
 } from "@shopify/polaris";
+import {
+  createBudgetCategory,
+  updateBudgetCategory,
+  deleteBudgetCategory,
+  getBudgetCategoriesWithPagination as getBudgetCategories,
+} from "../actions/index.server.js";
 
 // Loader function - handles GET requests
 export async function loader({ request }) {
-  const {
-    getBudgetCategories
-  } = await import("../actions/budget-categories.server.js");
-  
   const url = new URL(request.url);
   const page = parseInt(url.searchParams.get("page") || "1");
   const limit = parseInt(url.searchParams.get("limit") || "20");
@@ -43,26 +52,19 @@ export async function loader({ request }) {
     search,
     sortBy,
     sortOrder,
-    activeOnly
+    activeOnly,
   });
 
   return json({
     categories: categoriesResult.data || [],
     pagination: categoriesResult.pagination || null,
     success: categoriesResult.success,
-    error: categoriesResult.error || null
+    error: categoriesResult.error || null,
   });
 }
 
 // Action function - handles POST, PUT, DELETE requests
 export async function action({ request }) {
-  const {
-    getBudgetCategoryById,
-    createBudgetCategory,
-    updateBudgetCategory,
-    deleteBudgetCategory
-  } = await import("../actions/budget-categories.server.js");
-  
   const formData = await request.formData();
   const intent = formData.get("intent");
 
@@ -73,7 +75,7 @@ export async function action({ request }) {
         category_code: formData.get("category_code"),
         description: formData.get("description"),
         sort_order: parseInt(formData.get("sort_order") || "0"),
-        created_by: "admin"
+        created_by: "admin",
       };
       return json(await createBudgetCategory(createData));
 
@@ -85,7 +87,7 @@ export async function action({ request }) {
         description: formData.get("description"),
         sort_order: parseInt(formData.get("sort_order") || "0"),
         is_active: formData.get("is_active") === "true",
-        updated_by: "admin"
+        updated_by: "admin",
       };
       return json(await updateBudgetCategory(updateId, updateData));
 
@@ -116,17 +118,28 @@ export default function BudgetCategoriesManagement() {
     category_code: "",
     description: "",
     sort_order: 0,
-    is_active: true
+    is_active: true,
   });
 
   // State for filters
-  const [searchValue, setSearchValue] = useState(searchParams.get("search") || "");
-  const [sortBy, setSortBy] = useState(searchParams.get("sortBy") || "category_name");
-  const [sortOrder, setSortOrder] = useState(searchParams.get("sortOrder") || "ASC");
-  const [activeOnly, setActiveOnly] = useState(searchParams.get("activeOnly") !== "false");
+  const [searchValue, setSearchValue] = useState(
+    searchParams.get("search") || ""
+  );
+  const [sortBy, setSortBy] = useState(
+    searchParams.get("sortBy") || "category_name"
+  );
+  const [sortOrder, setSortOrder] = useState(
+    searchParams.get("sortOrder") || "ASC"
+  );
+  const [activeOnly, setActiveOnly] = useState(
+    searchParams.get("activeOnly") !== "false"
+  );
 
   // State for toast notifications
   const [toast, setToast] = useState(null);
+
+  // State for form errors
+  const [formErrors, setFormErrors] = useState({});
 
   const isLoading = navigation.state !== "idle";
 
@@ -136,22 +149,22 @@ export default function BudgetCategoriesManagement() {
       if (actionData.success) {
         setToast({
           content: actionData.message || "Operation completed successfully",
-          duration: 3000
+          duration: 3000,
         });
-        
+
         // Close modals and reset form
         setIsCreateModalOpen(false);
         setIsEditModalOpen(false);
         setIsDeleteModalOpen(false);
         resetForm();
-        
+
         // Refresh data by navigating to current page
         window.location.reload();
       } else {
         setToast({
           content: actionData.error || "Operation failed",
           error: true,
-          duration: 5000
+          duration: 5000,
         });
       }
     }
@@ -163,9 +176,10 @@ export default function BudgetCategoriesManagement() {
       category_code: "",
       description: "",
       sort_order: 0,
-      is_active: true
+      is_active: true,
     });
     setSelectedCategory(null);
+    setFormErrors({});
   };
 
   const handleSearch = () => {
@@ -227,7 +241,7 @@ export default function BudgetCategoriesManagement() {
       category_code: category.category_code || "",
       description: category.description || "",
       sort_order: category.sort_order || 0,
-      is_active: category.is_active
+      is_active: category.is_active,
     });
     setIsEditModalOpen(true);
   };
@@ -235,6 +249,34 @@ export default function BudgetCategoriesManagement() {
   const openDeleteModal = (category) => {
     setSelectedCategory(category);
     setIsDeleteModalOpen(true);
+  };
+
+  // Form validation
+  const validateForm = () => {
+    const errors = {};
+
+    if (!formData.category_name.trim()) {
+      errors.category_name = "Category name is required";
+    }
+
+    if (formData.sort_order < 0) {
+      errors.sort_order = "Sort order must be a positive number";
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleCreateSubmit = () => {
+    if (validateForm()) {
+      document.getElementById("create-category-form").requestSubmit();
+    }
+  };
+
+  const handleEditSubmit = () => {
+    if (validateForm()) {
+      document.getElementById("edit-category-form").requestSubmit();
+    }
   };
 
   // Prepare data for DataTable
@@ -245,16 +287,22 @@ export default function BudgetCategoriesManagement() {
     { content: "Description", key: "description" },
     { content: "Sort Order", key: "sort_order" },
     { content: "Status", key: "status" },
-    { content: "Actions", key: "actions" }
+    { content: "Actions", key: "actions" },
   ];
 
   const tableRows = categories.map((category) => [
     category.id,
-    <Button variant="plain" onClick={() => openEditModal(category)}>
+    <Button variant='plain' onClick={() => openEditModal(category)}>
       {category.category_name}
     </Button>,
     category.category_code || "-",
-    <div style={{ maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis" }}>
+    <div
+      style={{
+        maxWidth: "200px",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+      }}
+    >
       {category.description || "-"}
     </div>,
     category.sort_order || 0,
@@ -262,24 +310,21 @@ export default function BudgetCategoriesManagement() {
       {category.is_active ? "Active" : "Inactive"}
     </Badge>,
     <ButtonGroup segmented>
-      <Tooltip content="Edit category">
-        <Button 
-          onClick={() => openEditModal(category)}
-          size="slim"
-        >
+      <Tooltip content='Edit category'>
+        <Button onClick={() => openEditModal(category)} size='slim'>
           Edit
         </Button>
       </Tooltip>
-      <Tooltip content="Delete category">
-        <Button 
+      <Tooltip content='Delete category'>
+        <Button
           onClick={() => openDeleteModal(category)}
-          size="slim"
-          tone="critical"
+          size='slim'
+          tone='critical'
         >
           Delete
         </Button>
       </Tooltip>
-    </ButtonGroup>
+    </ButtonGroup>,
   ]);
 
   const filters = [
@@ -288,37 +333,37 @@ export default function BudgetCategoriesManagement() {
       label: "Status",
       filter: (
         <ChoiceList
-          title="Status"
+          title='Status'
           titleHidden
           choices={[
             { label: "Active only", value: "true" },
-            { label: "All categories", value: "false" }
+            { label: "All categories", value: "false" },
           ]}
           selected={[activeOnly.toString()]}
           onChange={(values) => handleActiveFilter(values[0] === "true")}
         />
-      )
-    }
+      ),
+    },
   ];
 
   return (
     <Frame>
       <Page
-        title="Budget Categories Management"
-        subtitle="Manage budget categories for your organization"
+        title='Budget Categories Management'
+        subtitle='Manage budget categories for your organization'
         primaryAction={{
           content: "Create Category",
-          onAction: openCreateModal
+          onAction: openCreateModal,
         }}
         secondaryActions={[
           {
             content: "Back to Budget Management",
-            url: "/app"
-          }
+            url: "/app",
+          },
         ]}
       >
         {error && (
-          <Banner status="critical" title="Error loading categories">
+          <Banner status='critical' title='Error loading categories'>
             <p>{error}</p>
           </Banner>
         )}
@@ -329,7 +374,7 @@ export default function BudgetCategoriesManagement() {
             <div style={{ marginBottom: "16px" }}>
               <Filters
                 queryValue={searchValue}
-                queryPlaceholder="Search categories..."
+                queryPlaceholder='Search categories...'
                 onQueryChange={setSearchValue}
                 onQueryClear={() => {
                   setSearchValue("");
@@ -344,9 +389,7 @@ export default function BudgetCategoriesManagement() {
                 }}
                 filters={filters}
               >
-                <Button onClick={handleSearch}>
-                  Search
-                </Button>
+                <Button onClick={handleSearch}>Search</Button>
               </Filters>
             </div>
 
@@ -354,32 +397,51 @@ export default function BudgetCategoriesManagement() {
             {categories.length > 0 ? (
               <>
                 <DataTable
-                  columnContentTypes={["text", "text", "text", "text", "numeric", "text", "text"]}
-                  headings={tableHeaders.map(header => (
+                  columnContentTypes={[
+                    "text",
+                    "text",
+                    "text",
+                    "text",
+                    "numeric",
+                    "text",
+                    "text",
+                  ]}
+                  headings={tableHeaders.map((header) => (
                     <Button
-                      variant="plain"
+                      variant='plain'
                       onClick={() => handleSort(header.key)}
                     >
                       {header.content}
-                      {sortBy === header.key && (sortOrder === "ASC" ? " ↑" : " ↓")}
+                      {sortBy === header.key &&
+                        (sortOrder === "ASC" ? " ↑" : " ↓")}
                     </Button>
                   ))}
                   rows={tableRows}
                   footerContent={
                     pagination && pagination.totalRecords > 0
-                      ? `Showing ${((pagination.currentPage - 1) * pagination.pageSize) + 1}-${Math.min(pagination.currentPage * pagination.pageSize, pagination.totalRecords)} of ${pagination.totalRecords} categories`
+                      ? `Showing ${(pagination.currentPage - 1) * pagination.pageSize + 1}-${Math.min(pagination.currentPage * pagination.pageSize, pagination.totalRecords)} of ${pagination.totalRecords} categories`
                       : null
                   }
                 />
 
                 {/* Pagination */}
                 {pagination && pagination.totalPages > 1 && (
-                  <div style={{ display: "flex", justifyContent: "center", marginTop: "16px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "center",
+                      marginTop: "16px",
+                    }}
+                  >
                     <Pagination
                       hasPrevious={pagination.hasPrevious}
-                      onPrevious={() => handlePageChange(pagination.currentPage - 1)}
+                      onPrevious={() =>
+                        handlePageChange(pagination.currentPage - 1)
+                      }
                       hasNext={pagination.hasNext}
-                      onNext={() => handlePageChange(pagination.currentPage + 1)}
+                      onNext={() =>
+                        handlePageChange(pagination.currentPage + 1)
+                      }
                       label={`Page ${pagination.currentPage} of ${pagination.totalPages}`}
                     />
                   </div>
@@ -387,14 +449,17 @@ export default function BudgetCategoriesManagement() {
               </>
             ) : (
               <EmptyState
-                heading="No budget categories found"
+                heading='No budget categories found'
                 action={{
                   content: "Create Category",
-                  onAction: openCreateModal
+                  onAction: openCreateModal,
                 }}
-                image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                image='https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png'
               >
-                <p>Start by creating your first budget category to organize your budget allocations.</p>
+                <p>
+                  Start by creating your first budget category to organize your
+                  budget allocations.
+                </p>
               </EmptyState>
             )}
           </div>
@@ -404,57 +469,70 @@ export default function BudgetCategoriesManagement() {
         <Modal
           open={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
-          title="Create New Budget Category"
+          title='Create New Budget Category'
           primaryAction={{
             content: "Create",
-            onAction: () => document.getElementById("create-category-form").requestSubmit(),
-            loading: isLoading
+            onAction: handleCreateSubmit,
+            loading: isLoading,
           }}
           secondaryActions={[
             {
               content: "Cancel",
-              onAction: () => setIsCreateModalOpen(false)
-            }
+              onAction: () => setIsCreateModalOpen(false),
+            },
           ]}
         >
           <Modal.Section>
-            <Form method="post" id="create-category-form">
-              <input type="hidden" name="intent" value="create" />
+            <Form method='post' id='create-category-form'>
+              <input type='hidden' name='intent' value='create' />
               <FormLayout>
                 <TextField
-                  label="Category Name"
-                  name="category_name"
+                  label='Category Name'
+                  name='category_name'
                   value={formData.category_name}
-                  onChange={(value) => setFormData({ ...formData, category_name: value })}
-                  placeholder="e.g., Gen Nsg>Medical Supplies"
-                  autoComplete="off"
+                  onChange={(value) =>
+                    setFormData({ ...formData, category_name: value })
+                  }
+                  placeholder='e.g., Gen Nsg>Medical Supplies'
+                  autoComplete='off'
                   requiredIndicator
+                  error={formErrors.category_name}
                 />
                 <TextField
-                  label="Category Code"
-                  name="category_code"
+                  label='Category Code'
+                  name='category_code'
                   value={formData.category_code}
-                  onChange={(value) => setFormData({ ...formData, category_code: value })}
-                  placeholder="Optional category code"
-                  autoComplete="off"
+                  onChange={(value) =>
+                    setFormData({ ...formData, category_code: value })
+                  }
+                  placeholder='Optional category code'
+                  autoComplete='off'
                 />
                 <TextField
-                  label="Description"
-                  name="description"
+                  label='Description'
+                  name='description'
                   value={formData.description}
-                  onChange={(value) => setFormData({ ...formData, description: value })}
-                  placeholder="Optional description"
+                  onChange={(value) =>
+                    setFormData({ ...formData, description: value })
+                  }
+                  placeholder='Optional description'
                   multiline={3}
-                  autoComplete="off"
+                  autoComplete='off'
                 />
                 <TextField
-                  label="Sort Order"
-                  name="sort_order"
-                  type="number"
+                  label='Sort Order'
+                  name='sort_order'
+                  type='number'
                   value={formData.sort_order.toString()}
-                  onChange={(value) => setFormData({ ...formData, sort_order: parseInt(value) || 0 })}
-                  placeholder="0"
-                  autoComplete="off"
+                  onChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      sort_order: parseInt(value) || 0,
+                    })
+                  }
+                  placeholder='0'
+                  autoComplete='off'
+                  error={formErrors.sort_order}
                 />
               </FormLayout>
             </Form>
@@ -465,62 +543,86 @@ export default function BudgetCategoriesManagement() {
         <Modal
           open={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
-          title="Edit Budget Category"
+          title='Edit Budget Category'
           primaryAction={{
             content: "Update",
-            onAction: () => document.getElementById("edit-category-form").requestSubmit(),
-            loading: isLoading
+            onAction: handleEditSubmit,
+            loading: isLoading,
           }}
           secondaryActions={[
             {
               content: "Cancel",
-              onAction: () => setIsEditModalOpen(false)
-            }
+              onAction: () => setIsEditModalOpen(false),
+            },
           ]}
         >
           <Modal.Section>
-            <Form method="post" id="edit-category-form">
-              <input type="hidden" name="intent" value="update" />
-              <input type="hidden" name="id" value={selectedCategory?.id || ""} />
+            <Form method='post' id='edit-category-form'>
+              <input type='hidden' name='intent' value='update' />
+              <input
+                type='hidden'
+                name='id'
+                value={selectedCategory?.id || ""}
+              />
               <FormLayout>
                 <TextField
-                  label="Category Name"
-                  name="category_name"
+                  label='Category Name'
+                  name='category_name'
                   value={formData.category_name}
-                  onChange={(value) => setFormData({ ...formData, category_name: value })}
-                  placeholder="e.g., Gen Nsg>Medical Supplies"
-                  autoComplete="off"
+                  onChange={(value) =>
+                    setFormData({ ...formData, category_name: value })
+                  }
+                  placeholder='e.g., Gen Nsg>Medical Supplies'
+                  autoComplete='off'
                   requiredIndicator
+                  error={formErrors.category_name}
                 />
                 <TextField
-                  label="Category Code"
-                  name="category_code"
+                  label='Category Code'
+                  name='category_code'
                   value={formData.category_code}
-                  onChange={(value) => setFormData({ ...formData, category_code: value })}
-                  placeholder="Optional category code"
-                  autoComplete="off"
+                  onChange={(value) =>
+                    setFormData({ ...formData, category_code: value })
+                  }
+                  placeholder='Optional category code'
+                  autoComplete='off'
                 />
                 <TextField
-                  label="Description"
-                  name="description"
+                  label='Description'
+                  name='description'
                   value={formData.description}
-                  onChange={(value) => setFormData({ ...formData, description: value })}
-                  placeholder="Optional description"
+                  onChange={(value) =>
+                    setFormData({ ...formData, description: value })
+                  }
+                  placeholder='Optional description'
                   multiline={3}
-                  autoComplete="off"
+                  autoComplete='off'
                 />
                 <TextField
-                  label="Sort Order"
-                  name="sort_order"
-                  type="number"
+                  label='Sort Order'
+                  name='sort_order'
+                  type='number'
                   value={formData.sort_order.toString()}
-                  onChange={(value) => setFormData({ ...formData, sort_order: parseInt(value) || 0 })}
-                  autoComplete="off"
+                  onChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      sort_order: parseInt(value) || 0,
+                    })
+                  }
+                  autoComplete='off'
+                  error={formErrors.sort_order}
                 />
-                <input 
-                  type="hidden" 
-                  name="is_active" 
-                  value={formData.is_active.toString()} 
+                <Checkbox
+                  label='Active'
+                  checked={formData.is_active}
+                  onChange={(checked) =>
+                    setFormData({ ...formData, is_active: checked })
+                  }
+                />
+                <input
+                  type='hidden'
+                  name='is_active'
+                  value={formData.is_active.toString()}
                 />
               </FormLayout>
             </Form>
@@ -531,31 +633,38 @@ export default function BudgetCategoriesManagement() {
         <Modal
           open={isDeleteModalOpen}
           onClose={() => setIsDeleteModalOpen(false)}
-          title="Delete Budget Category"
+          title='Delete Budget Category'
           primaryAction={{
             content: "Delete",
             destructive: true,
-            onAction: () => document.getElementById("delete-category-form").requestSubmit(),
-            loading: isLoading
+            onAction: () =>
+              document.getElementById("delete-category-form").requestSubmit(),
+            loading: isLoading,
           }}
           secondaryActions={[
             {
               content: "Cancel",
-              onAction: () => setIsDeleteModalOpen(false)
-            }
+              onAction: () => setIsDeleteModalOpen(false),
+            },
           ]}
         >
           <Modal.Section>
             <p>
-              Are you sure you want to delete the category "<strong>{selectedCategory?.category_name}</strong>"?
+              Are you sure you want to delete the category "
+              <strong>{selectedCategory?.category_name}</strong>"?
             </p>
             <p style={{ marginTop: "8px", color: "#bf0711" }}>
-              This action will deactivate the category and it won't be available for new budgets.
-              Existing budget allocations using this category will not be affected.
+              This action will deactivate the category and it won't be available
+              for new budgets. Existing budget allocations using this category
+              will not be affected.
             </p>
-            <Form method="post" id="delete-category-form">
-              <input type="hidden" name="intent" value="delete" />
-              <input type="hidden" name="id" value={selectedCategory?.id || ""} />
+            <Form method='post' id='delete-category-form'>
+              <input type='hidden' name='intent' value='delete' />
+              <input
+                type='hidden'
+                name='id'
+                value={selectedCategory?.id || ""}
+              />
             </Form>
           </Modal.Section>
         </Modal>

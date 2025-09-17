@@ -68,6 +68,14 @@ export {
   assignBudgetToLocation
 } from './fhr-budget.server.js';
 
+// Budget Categories Management Actions
+export {
+  createBudgetCategory,
+  updateBudgetCategory,
+  deleteBudgetCategory,
+  getBudgetCategories as getBudgetCategoriesWithPagination
+} from './budget-categories.server.js';
+
 
 
 

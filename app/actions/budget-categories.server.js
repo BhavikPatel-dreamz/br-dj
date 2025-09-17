@@ -88,7 +88,7 @@ export async function getBudgetCategories(params = {}) {
             data: [],
             pagination: {
                 currentPage: 1,
-                pageSize: limit || 20,
+                pageSize: params.limit || 20,
                 totalRecords: 0,
                 totalPages: 0,
                 hasNext: false,
@@ -198,7 +198,7 @@ export async function createBudgetCategory(categoryData) {
 // Update an existing budget category
 export async function updateBudgetCategory(id, categoryData) {
     try {
-        const { category_name, category_code, description, sort_order, updated_by } = categoryData;
+        const { category_name, category_code, description, sort_order, is_active, updated_by } = categoryData;
 
         if (!id) {
             return {
@@ -251,6 +251,7 @@ export async function updateBudgetCategory(id, categoryData) {
                 category_code = @category_code,
                 description = @description,
                 sort_order = @sort_order,
+                is_active = @is_active,
                 updated_by = @updated_by,
                 updated_at = GETDATE()
             OUTPUT INSERTED.id, INSERTED.category_name, INSERTED.category_code, 
@@ -263,6 +264,7 @@ export async function updateBudgetCategory(id, categoryData) {
             category_code: category_code?.trim() || null,
             description: description?.trim() || null,
             sort_order: sort_order || 0,
+            is_active: is_active !== undefined ? is_active : true,
             updated_by: updated_by
         });
 
