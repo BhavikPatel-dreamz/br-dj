@@ -179,11 +179,16 @@ export async function handleBudgetAction({ intent, formData }) {
 
       case "delete": {
         const id = formData.get("id");
-        const result = await deleteBudget(id);
-        if (result.success) {
-          return { success: "Budget deleted successfully" };
+        try {
+          const result = await deleteBudget(id);
+          if (result.success) {
+            return { success: "Budget deleted successfully" };
+          }
+          return { error: result.error || "Failed to delete budget" };
+        } catch (error) {
+          console.error("Delete error:", error);
+          return { error: error.message || "Failed to delete budget" };
         }
-        return { error: result.error || "Failed to delete budget" };
       }
 
       case "assign": {
@@ -191,15 +196,21 @@ export async function handleBudgetAction({ intent, formData }) {
         const locationId = formData.get("locationId");
         const assignedBy = formData.get("assignedBy");
 
-        const result = await assignBudgetToLocation({
-          budgetId,
-          locationId,
-          assignedBy
-        });
-        if (result.success) {
-          return { success: "Budget assigned to location successfully" };
+        try {
+          const result = await assignBudgetToLocation({
+            budgetId,
+            locationId,
+            assignedBy
+          });
+          
+          if (result.success) {
+            return { success: "Budget assigned to location successfully" };
+          }
+          return { error: result.error || "Failed to assign budget to location" };
+        } catch (error) {
+          console.error("Assignment error:", error);
+          return { error: error.message || "Failed to assign budget to location" };
         }
-        return { error: result.error || "Failed to assign budget" };
       }
 
       default:

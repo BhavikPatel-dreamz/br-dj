@@ -198,7 +198,7 @@ export default function BudgetForm() {
     return availableCategories
       .filter(category => category.id && !selectedCategoryIds.includes(category.id.toString()))
       .map(category => ({ 
-        label: `${category.parent_category || 'General'} > ${category.name.split('>')[1] || category.name}`, 
+        label: category.name, 
         value: category.id.toString() 
       }));
   };

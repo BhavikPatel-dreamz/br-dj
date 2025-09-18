@@ -190,7 +190,7 @@ export async function getSimpleBudgets() {
       SELECT 
         b.*,
         bcm.category_name as category,
-        bc.allocated_amount as amount
+        b.total_amount as amount
       FROM shopify.budget b
       LEFT JOIN shopify.budget_categories bc ON b.id = bc.budget_id
       LEFT JOIN shopify.budget_categories_master bcm ON bc.category_id = bcm.id
@@ -731,8 +731,30 @@ export async function updateBudget(budgetId, updateData) {
  */
 export async function deleteBudget(budgetId) {
   try {
+    if (!budgetId) {
+      return { success: false, error: "Budget ID is required" };
+    }
 
     console.log("deleted budget id:", budgetId);
+
+    // Check if budget exists before attempting to delete
+    const existingBudget = await mssql.query(`
+      SELECT id FROM shopify.budget WHERE id = @budgetId
+    `, { budgetId });
+
+    if (!existingBudget || existingBudget.length === 0) {
+      return { success: false, error: "Budget not found" };
+    }
+
+    // Check if budget has any assignments before deleting
+    const assignments = await mssql.query(`
+      SELECT COUNT(*) as count FROM shopify.budget_location_assignments 
+      WHERE budget_id = @budgetId AND status = 'active'
+    `, { budgetId });
+
+    if (assignments && assignments[0].count > 0) {
+      return { success: false, error: "Cannot delete budget that has active location assignments. Please remove assignments first." };
+    }
 
     const result = await mssql.query(`
       DELETE FROM shopify.budget WHERE id = @budgetId
@@ -740,10 +762,14 @@ export async function deleteBudget(budgetId) {
 
     console.log("deleted budget result:", result);
 
-    return true;
+    if (result.rowsAffected && result.rowsAffected[0] > 0) {
+      return { success: true };
+    } else {
+      return { success: false, error: "No budget was deleted. Budget may not exist." };
+    }
   } catch (error) {
     console.error("Error deleting budget:", error);
-    throw new Error(`Failed to delete budget: ${error.message}`);
+    return { success: false, error: `Failed to delete budget: ${error.message}` };
   }
 }
 
@@ -833,13 +859,13 @@ export async function assignBudgetToLocation(assignmentData) {
   try {
     // Validate input
     if (!assignmentData || !assignmentData.budgetId || !assignmentData.locationId) {
-      throw new Error("Budget ID and location ID are required");
+      return { success: false, error: "Budget ID and location ID are required" };
     }
 
     // Check if budget exists
     const budget = await getBudgetById(assignmentData.budgetId);
     if (!budget) {
-      throw new Error("Budget not found");
+      return { success: false, error: "Budget not found" };
     }
 
     // Check if assignment already exists
@@ -852,7 +878,7 @@ export async function assignBudgetToLocation(assignmentData) {
     });
 
     if (existingAssignment && existingAssignment.length > 0) {
-      throw new Error("Budget is already assigned to this location");
+      return { success: false, error: "Budget is already assigned to this location" };
     }
 
     // Create assignment
@@ -866,10 +892,14 @@ export async function assignBudgetToLocation(assignmentData) {
       assignedBy: assignmentData.assignedBy || 'system'
     });
 
-    return result[0];
+    if (result && result.length > 0) {
+      return { success: true, data: result[0] };
+    } else {
+      return { success: false, error: "Failed to create assignment" };
+    }
   } catch (error) {
     console.error("Error assigning budget to location:", error);
-    throw new Error(`Failed to assign budget to location: ${error.message}`);
+    return { success: false, error: `Failed to assign budget to location: ${error.message}` };
   }
 }
 

@@ -64,6 +64,8 @@ async function makeShopifyGraphQLRequest(query, variables = {}) {
 
   const url = `https://${storeDomain}/admin/api/2025-01/graphql.json`;
 
+  console.log(`Making request to Shopify GraphQL API at ${url}`);
+
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -103,11 +105,11 @@ async function fetchAllProductMetafields() {
     let cursor = null;
     let page = 1;
 
-    while (hasNextPage && page <= 10) { // Limit to 10 pages (250 products max)
+    while (hasNextPage && page <= 10) { // Limit to 25 pages (625 products max)
       console.log(`📄 Fetching page ${page}...`);
       
       const variables = {
-        first: 25,
+        first: 250,
         after: cursor
       };
 
@@ -215,7 +217,7 @@ async function fetchAllProductMetafields() {
         console.log('');
       });
 
-      return apexGLCodes;
+      return { glCodes: apexGLCodes, allProducts: allProducts };
     } else {
       console.log('\n❌ No APEX GL Code metafields found');
       
@@ -237,12 +239,12 @@ async function fetchAllProductMetafields() {
         });
       }
 
-      return [];
+      return { glCodes: [], allProducts: allProducts };
     }
 
   } catch (error) {
     console.error('❌ Error fetching metafields:', error.message);
-    return [];
+    return { glCodes: [], allProducts: [] };
   }
 }
 
@@ -292,7 +294,7 @@ async function updateBudgetCategoriesFromGLCodes(glCodeMetafields) {
 
       // Insert or update budget category
       const upsertQuery = `
-        MERGE brdjdb.shopify.budget_categories_master AS target
+        MERGE shopify.budget_categories_master AS target
         USING (VALUES (@categoryName, @glCode, @description)) AS source (category_name, category_code, description)
         ON target.category_name = source.category_name
         WHEN MATCHED THEN
@@ -301,8 +303,8 @@ async function updateBudgetCategoriesFromGLCodes(glCodeMetafields) {
             updated_at = GETDATE(),
             updated_by = 'shopify_gl_sync'
         WHEN NOT MATCHED THEN
-          INSERT (category_name, category_code, description, sort_order, is_active, created_at, updated_at, created_by)
-          VALUES (source.category_name, source.category_code, source.description, 1000, 1, GETDATE(), GETDATE(), 'shopify_gl_sync');
+          INSERT (category_name, category_code, description, sort_order, is_active, created_at, updated_at, created_by, updated_by)
+          VALUES (source.category_name, source.category_code, source.description, 1000, 1, GETDATE(), GETDATE(), 'shopify_gl_sync', 'shopify_gl_sync');
       `;
 
       await mssql.query(upsertQuery, {
@@ -321,17 +323,206 @@ async function updateBudgetCategoriesFromGLCodes(glCodeMetafields) {
   }
 }
 
+// Add shopify_category column to products table and populate it
+async function addShopifyCategoryToProductsTable() {
+  try {
+    console.log('\n🔧 ADDING SHOPIFY_CATEGORY COLUMN TO PRODUCTS TABLE...');
+    console.log('═'.repeat(80));
+
+    // First, check if the column already exists
+    const checkColumnQuery = `
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_NAME = 'products' 
+      AND TABLE_SCHEMA = 'shopify'
+      AND COLUMN_NAME = 'shopify_category'
+    `;
+
+    const columnExists = await mssql.query(checkColumnQuery);
+
+    if (columnExists.length === 0) {
+      // Add the column if it doesn't exist
+      console.log('📝 Adding shopify_category column to shopify.product table...');
+      
+      const addColumnQuery = `
+        ALTER TABLE shopify.product
+        ADD shopify_category NVARCHAR(500) NULL
+      `;
+
+      await mssql.query(addColumnQuery);
+      console.log('✅ shopify_category column added successfully');
+    } else {
+      console.log('✅ shopify_category column already exists');
+    }
+
+    return { success: true };
+
+  } catch (error) {
+    console.error('❌ Error adding shopify_category column:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Update products table with category names from metafields
+async function updateProductsWithCategories() {
+  try {
+    console.log('\n📝 UPDATING PRODUCTS WITH CATEGORY NAMES FROM METAFIELDS...');
+    console.log('═'.repeat(80));
+
+    // Get all products from Shopify with their metafields
+    const result = await fetchAllProductMetafields();
+    const glCodeMetafields = Array.isArray(result) ? result : (result.glCodes || []);
+    
+    console.log(`Processing ${glCodeMetafields.length} products with GL codes...`);
+
+    if (glCodeMetafields.length === 0) {
+      console.log('No products with GL codes found to update.');
+      return { success: true, updated: 0 };
+    }
+
+    console.log(`glCodeMetafields length: ${glCodeMetafields}`);
+
+    glCodeMetafields.forEach(item => { 
+
+      console.log(item);
+
+    })
+
+    // Group products by their GL code category
+    const categoryMap = {};
+    glCodeMetafields.forEach(item => {
+       const productId = item.productId.replace('gid://shopify/Product/', ''); // Clean Shopify ID
+       const categoryValue = item.metafieldValue;
+
+       // Determine category name based on GL code or metafield key
+       let categoryName = categoryValue;
+
+       // Map specific GL codes to readable category names
+       if (item.metafieldKey === 'gl_code_name') {
+         categoryName = categoryValue; // Use the readable name directly
+       } 
+
+      if (!categoryMap[productId] && categoryName) {
+        categoryMap[productId] = {
+          productId: productId,
+          productTitle: item.productTitle,
+          category: categoryName,
+          productType: item.productType,
+          vendor: item.vendor
+        };
+      }
+    });
+
+    console.log(categoryMap);
+
+     console.log(`Updating ${Object.keys(categoryMap).length} unique products...`);
+
+     let updatedCount = 0;
+     let processedCount = 0;
+
+    // // Update products in batches
+    for (const [productId, productInfo] of Object.entries(categoryMap)) {
+      processedCount++;
+      
+      try {
+        // Check if product exists in our products table
+        const productExistsQuery = `
+          SELECT id FROM shopify.product 
+          WHERE id = @productId `;
+
+        const existingProduct = await mssql.query(productExistsQuery, {
+          productId: productId
+          
+        });
+
+        if (existingProduct.length > 0) {
+          // Update existing product with category
+          const updateQuery = `
+            UPDATE shopify.product
+            SET shopify_category = @category,
+                updated_at = GETDATE()
+            WHERE id = @productId
+          `;
+
+          await mssql.query(updateQuery, {
+            category: productInfo.category,
+            productId: productId,
+            
+          });
+
+          updatedCount++;
+          console.log(`✅ Updated: "${productInfo.productTitle}" → "${productInfo.category}"`);
+        }  
+        // Progress indicator
+        if (processedCount % 50 === 0) {
+          console.log(`   📊 Processed ${processedCount}/${Object.keys(categoryMap).length} products...`);
+        }
+
+      } catch (error) {
+        console.warn(`⚠️  Failed to update product ${productId}: ${error.message}`);
+      }
+    }
+
+    console.log(`\n🎉 Successfully updated ${updatedCount} products with category information!`);
+
+    // Show summary statistics
+    const statsQuery = `
+      SELECT 
+        shopify_category,
+        COUNT(*) as product_count
+      FROM shopify.product
+      WHERE shopify_category IS NOT NULL
+      GROUP BY shopify_category
+      ORDER BY product_count DESC
+    `;
+
+    const stats = await mssql.query(statsQuery);
+    
+    console.log('\n📊 CATEGORY DISTRIBUTION:');
+    stats.forEach(row => {
+      console.log(`   ${row.shopify_category}: ${row.product_count} products`);
+    });
+
+    return { 
+      success: true, 
+      updated: updatedCount, 
+      categories: stats.length 
+    };
+
+  } catch (error) {
+    console.error('❌ Error updating products with categories:', error);
+    return { success: false, error: error.message };
+  }
+}
+
 // Main execution
 async function main() {
   console.log('🚀 SHOPIFY METAFIELDS TO BUDGET CATEGORIES SYNC');
   console.log('═'.repeat(80));
   
   try {
-    const glCodeMetafields = await fetchAllProductMetafields();
+    // Step 1: Fetch GL codes and update budget categories
+    // const glCodeMetafields = await fetchAllProductMetafields();
+
+    // console.log(`\nTotal GL code metafields found: ${glCodeMetafields.length}`);
     
-    if (glCodeMetafields.length > 0) {
-      await updateBudgetCategoriesFromGLCodes(glCodeMetafields);
-    }
+    // if (glCodeMetafields.length > 0) {
+    //   await updateBudgetCategoriesFromGLCodes(glCodeMetafields);
+    // }
+
+    // // Step 2: Add shopify_category column to products table
+    // const columnResult = await addShopifyCategoryToProductsTable();
+    
+    // if (columnResult.success) {
+      // Step 3: Update products with category information
+      const updateResult = await updateProductsWithCategories();
+      
+      if (updateResult.success) {
+        console.log(`\n✅ Final Summary:`);
+        console.log(`   📦 Products updated with categories: ${updateResult.updated}`);
+        console.log(`   🏷️  Unique categories found: ${updateResult.categories}`);
+      }
+    //}
     
     console.log('\n✅ Script completed successfully!');
     

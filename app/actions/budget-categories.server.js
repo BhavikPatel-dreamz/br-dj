@@ -88,7 +88,7 @@ export async function getBudgetCategories(params = {}) {
             data: [],
             pagination: {
                 currentPage: 1,
-                pageSize: params.limit || 20,
+                pageSize: limit || 20,
                 totalRecords: 0,
                 totalPages: 0,
                 hasNext: false,
@@ -198,7 +198,7 @@ export async function createBudgetCategory(categoryData) {
 // Update an existing budget category
 export async function updateBudgetCategory(id, categoryData) {
     try {
-        const { category_name, category_code, description, sort_order, is_active, updated_by } = categoryData;
+        const { category_name, category_code, description, sort_order, updated_by } = categoryData;
 
         if (!id) {
             return {
@@ -251,7 +251,6 @@ export async function updateBudgetCategory(id, categoryData) {
                 category_code = @category_code,
                 description = @description,
                 sort_order = @sort_order,
-                is_active = @is_active,
                 updated_by = @updated_by,
                 updated_at = GETDATE()
             OUTPUT INSERTED.id, INSERTED.category_name, INSERTED.category_code, 
@@ -264,7 +263,6 @@ export async function updateBudgetCategory(id, categoryData) {
             category_code: category_code?.trim() || null,
             description: description?.trim() || null,
             sort_order: sort_order || 0,
-            is_active: is_active !== undefined ? is_active : true,
             updated_by: updated_by
         });
 
@@ -305,13 +303,12 @@ export async function deleteBudgetCategory(id) {
             };
         }
 
-        // Check if category is being used in any active budgets
+        // Check if category is being used in any budgets
         const usageResult = await mssql.query(`
             SELECT COUNT(*) as count
-            FROM shopify.budget_categories bc
-            INNER JOIN shopify.budget b ON bc.budget_id = b.id
-            WHERE bc.category_id = @category_id AND b.status = 'active'
-        `, { category_id: existingResult[0].id });
+            FROM shopify.budget_categories 
+            WHERE category_id = @id
+        `, { id: existingResult[0].id });
 
         if (usageResult[0].count > 0) {
             return {

@@ -127,6 +127,9 @@ export const action = async ({ request }) => {
       };
       
       try {
+
+        console.log("Assignment Data:", assignmentData);
+
         const result = await assignBudgetToLocation(assignmentData);
         
         return json({ 

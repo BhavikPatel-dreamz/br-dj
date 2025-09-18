@@ -6,7 +6,7 @@ const server = process.env.MS_SQL_HOST;
 const database = process.env.MS_SQL_DATABASE;
 const user = process.env.MS_SQL_USERNAME;
 // Remove quotes if they exist in the password
-const password = process.env.MS_SQL_PASSWORD;
+const password = 'TO7Pk#EYKiB*^I#S$R5it4$ebnytZy@h$3DkGCBN&bpvDalbe37Zok0@ict@NmW*eBN^O#P8hzLMWF&!Mu!WIpg6U2H9VH%^lXVQ58$D#AckYsH9&aZt3mTLZLdbQGu0'
 
 // Validate required environment variables
 if (!server || !database || !user || !password) {

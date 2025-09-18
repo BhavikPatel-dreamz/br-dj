@@ -3,7 +3,7 @@
 client_id = "b27fdce170227e5caef3d04f1e6f10ab"
 name = "br-dj"
 handle = "br-dj"
-application_url = "https://attractive-perfectly-tommy-rendered.trycloudflare.com"
+application_url = "https://bhavik.dynamicdreamz.com"
 embedded = true
 
 [build]
@@ -26,7 +26,7 @@ api_version = "2025-07"
 scopes = "write_products"
 
 [auth]
-redirect_urls = ["https://attractive-perfectly-tommy-rendered.trycloudflare.com/auth/callback", "https://attractive-perfectly-tommy-rendered.trycloudflare.com/auth/shopify/callback", "https://attractive-perfectly-tommy-rendered.trycloudflare.com/api/auth/callback"]
+redirect_urls = ["https://bhavik.dynamicdreamz.com/auth/callback", "https://bhavik.dynamicdreamz.com/auth/shopify/callback", "https://bhavik.dynamicdreamz.com/api/auth/callback"]
 
 [pos]
 embedded = false

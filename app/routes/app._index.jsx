@@ -6,9 +6,7 @@ import {
   Button,
   DataTable,
   TextField,
-  Select,
   FormLayout,
-  PageActions,
   Toast,
   Frame,
   Modal,
@@ -16,15 +14,16 @@ import {
   Text,
   InlineStack,
   Pagination,
-  Filters,
-  ResourceList,
-  ResourceItem,
-  Avatar,
+  
   Badge,
   EmptyState,
   Layout,
-  Banner
+  Banner,
+  Combobox,
+  Listbox,
+  Icon
 } from "@shopify/polaris";
+import { SearchIcon } from "@shopify/polaris-icons";
 import { useState, useCallback, useEffect } from "react";
 import { loadBudgetData, handleBudgetAction } from "../actions/budget-management.server";
 
@@ -78,6 +77,7 @@ export default function BudgetManagement() {
   const [searchValue, setSearchValue] = useState(filters.search);
   const [toastActive, setToastActive] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  const [assignmentError, setAssignmentError] = useState("");
 
   // Form state
   const [formData, setFormData] = useState({
@@ -96,6 +96,13 @@ export default function BudgetManagement() {
     assignedBy: ""
   });
 
+  // Location search state
+  const [locationSearchValue, setLocationSearchValue] = useState("");
+  const [locationSearchActive, setLocationSearchActive] = useState(false);
+
+  // Get the budget being assigned for display purposes
+  const budgetBeingAssigned = selectedBudget || budgets.find(b => b.id === assignmentData.budgetId);
+
   const isLoading = navigation.state === "submitting";
 
   // Effects
@@ -104,12 +111,18 @@ export default function BudgetManagement() {
       setToastMessage(actionData.success);
       setToastActive(true);
       setModalActive(false);
+      setAssignmentError("");
       resetForm();
     } else if (actionData?.error) {
-      setToastMessage(actionData.error);
-      setToastActive(true);
+      // Handle assignment-specific errors differently
+      if (modalType === "assign" && modalActive) {
+        setAssignmentError(actionData.error);
+      } else {
+        setToastMessage(actionData.error);
+        setToastActive(true);
+      }
     }
-  }, [actionData]);
+  }, [actionData, modalType, modalActive]);
 
   // Handlers
   const resetForm = useCallback(() => {
@@ -127,7 +140,10 @@ export default function BudgetManagement() {
       locationId: "",
       assignedBy: ""
     });
+    setLocationSearchValue("");
+    setLocationSearchActive(false);
     setSelectedBudget(null);
+    setAssignmentError("");
   }, []);
 
   const handleModalToggle = useCallback((type = "", budget = null) => {
@@ -135,6 +151,7 @@ export default function BudgetManagement() {
       // Close modal
       setModalActive(false);
       setModalType("");
+      setAssignmentError("");
       resetForm();
       return;
     }
@@ -142,11 +159,21 @@ export default function BudgetManagement() {
     // Open modal with specific type
     setModalType(type);
     setModalActive(true);
+    setAssignmentError("");
     
     if (budget && type === "delete") {
       setSelectedBudget(budget);
-    } else if (type === "assign") {
-      setAssignmentData(prev => ({ ...prev, budgetId: budget?.id || "" }));
+    } else if (type === "assign" && budget) {
+      // Set the budget for assignment and clear previous location selection
+      setSelectedBudget(budget);
+      setAssignmentData(prev => ({ 
+        ...prev, 
+        budgetId: budget.id || "",
+        locationId: "", // Clear previous selection
+        assignedBy: "" // Clear previous assignedBy
+      }));
+      setLocationSearchValue("");
+      setLocationSearchActive(false);
     } else {
       resetForm();
     }
@@ -160,14 +187,37 @@ export default function BudgetManagement() {
     setAssignmentData(prev => ({ ...prev, [field]: value }));
   }, []);
 
+  // Location search handlers
+  const filteredLocations = locations.filter(location => 
+    location.name?.toLowerCase().includes(locationSearchValue.toLowerCase()) ||
+    location.id?.toLowerCase().includes(locationSearchValue.toLowerCase())
+  );
+
+  const selectedLocation = locations.find(location => location.id === assignmentData.locationId);
+
+  const handleLocationSelect = useCallback((locationId) => {
+    setAssignmentData(prev => ({ ...prev, locationId }));
+    setLocationSearchActive(false);
+    setLocationSearchValue("");
+    setAssignmentError(""); // Clear any previous assignment errors
+  }, []);
+
   const handleSubmit = useCallback((intent) => {
     const form = new FormData();
     form.append("intent", intent);
     
     if (intent === "assign") {
+      // Debug logging for assignment
+      console.log("Assignment data being sent:", assignmentData);
       Object.keys(assignmentData).forEach(key => {
-        form.append(key, assignmentData[key]);
+        if (assignmentData[key]) { // Only append non-empty values
+          form.append(key, assignmentData[key]);
+        }
       });
+      console.log("FormData entries for assignment:");
+      for (let [key, value] of form.entries()) {
+        console.log(`${key}: ${value}`);
+      }
     } else {
       if (selectedBudget?.id && (intent === "update" || intent === "delete")) {
         form.append("id", selectedBudget.id);
@@ -232,13 +282,13 @@ export default function BudgetManagement() {
 
     const tableRows = budgets.map((budget) => [
       budget.name || "Unnamed",
-      budget.amount ? `$${budget.amount.toLocaleString()}` : "$0",
+      budget.amount,
       budget.period || "N/A",
       <Badge status={budget.status === "active" ? "success" : "attention"}>
         {budget.status || "Unknown"}
       </Badge>,
-      budget.start_date ? new Date(budget.start_date).toLocaleDateString() : "N/A",
-      budget.end_date ? new Date(budget.end_date).toLocaleDateString() : "N/A",
+     // budget.start_date ? new Date(budget.start_date).toLocaleDateString() : "N/A",
+      //budget.end_date ? new Date(budget.end_date).toLocaleDateString() : "N/A",
       <InlineStack align="end" gap="200">
         <Button 
           size="slim" 
@@ -264,8 +314,8 @@ export default function BudgetManagement() {
         <DataTable
           columnContentTypes={[
             'text',
-            'text',
-            'text',
+           // 'text',
+           // 'text',
             'text',
             'text',
             'text',
@@ -276,8 +326,8 @@ export default function BudgetManagement() {
             'Amount',
             'Period',
             'Status',
-            'Start Date',
-            'End Date',
+            //'Start Date',
+            //'End Date',
             'Actions'
           ]}
           rows={tableRows}
@@ -329,6 +379,7 @@ export default function BudgetManagement() {
           primaryAction={{
             content: "Assign",
             loading: isLoading,
+            disabled: !assignmentData.locationId,
             onAction: () => handleSubmit("assign")
           }}
           secondaryActions={[
@@ -339,19 +390,129 @@ export default function BudgetManagement() {
           ]}
         >
           <Modal.Section>
+            {budgetBeingAssigned && (
+              <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f6f6f7', borderRadius: '6px' }}>
+                <Text variant="bodyMd" fontWeight="medium">
+                  Assigning Budget: {budgetBeingAssigned.name}
+                </Text>
+                <Text variant="bodySm" color="subdued">
+                  Amount: {budgetBeingAssigned.amount ? `$${budgetBeingAssigned.amount.toLocaleString()}` : 'N/A'} | 
+                  Period: {budgetBeingAssigned.period || 'N/A'} |
+                  Status: {budgetBeingAssigned.status || 'N/A'}
+                </Text>
+              </div>
+            )}
+            
+            {assignmentError && (
+              <div style={{ 
+                marginBottom: '16px', 
+                padding: '12px', 
+                backgroundColor: '#fef2f2', 
+                borderRadius: '6px',
+                border: '1px solid #fecaca'
+              }}>
+                <Text variant="bodyMd" fontWeight="medium" color="critical">
+                  Assignment Failed
+                </Text>
+                <Text variant="bodySm" color="critical">
+                  {assignmentError.includes('already assigned') 
+                    ? 'This budget is already assigned to the selected location. Please choose a different location or remove the existing assignment first.'
+                    : assignmentError
+                  }
+                </Text>
+              </div>
+            )}
+            
             <FormLayout>
-              <Select
-                label="Select Location"
-                options={[
-                  { label: "Choose a location", value: "" },
-                  ...locations.map(loc => ({ 
-                    label: loc.name || loc.location_id, 
-                    value: loc.location_id 
-                  }))
-                ]}
-                value={assignmentData.locationId}
-                onChange={(value) => handleAssignmentChange("locationId", value)}
-              />
+              <div>
+                <Text variant="bodyMd" fontWeight="medium" as="label">
+                  Select Location *
+                </Text>
+                <div style={{ marginTop: '4px' }}>
+                  <Combobox
+                    activator={
+                      <Combobox.TextField
+                        prefix={<Icon source={SearchIcon} />}
+                        onChange={setLocationSearchValue}
+                        value={locationSearchValue}
+                        placeholder="Search locations..."
+                        autoComplete="off"
+                      />
+                    }
+                  >
+                    {filteredLocations.length > 0 ? (
+                      <Listbox onSelect={handleLocationSelect}>
+                        {filteredLocations.map(location => (
+                          <Listbox.Option
+                            key={location.id}
+                            value={location.id}
+                            selected={assignmentData.locationId === location.id}
+                          >
+                            <div style={{ 
+                              padding: '12px 16px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              transition: 'background-color 0.15s ease',
+                              backgroundColor: assignmentData.locationId === location.id ? '#f1f5f9' : 'transparent'
+                            }}>
+                              <div style={{ marginBottom: '4px' }}>
+                                <Text variant="bodyMd" fontWeight="medium" color="base">
+                                  {location.name}
+                                </Text>
+                              </div>
+                              {/* <div style={{ marginBottom: '2px' }}>
+                                <Text variant="bodySm" color="subdued">
+                                  ID: {location.id}
+                                </Text>
+                              </div> */}
+                              {/* {location.orderCount && (
+                                <div style={{ 
+                                  display: 'inline-block',
+                                  marginTop: '6px',
+                                  padding: '2px 8px',
+                                  backgroundColor: '#e0f2fe',
+                                  borderRadius: '12px',
+                                  border: '1px solid #b3e5fc'
+                                }}>
+                                  <Text variant="bodySm" color="base" fontWeight="medium">
+                                    {location.orderCount} orders
+                                  </Text>
+                                </div>
+                              )} */}
+                            </div>
+                          </Listbox.Option>
+                        ))}
+                      </Listbox>
+                    ) : (
+                      <Listbox>
+                        <Listbox.Option disabled>
+                          <Text color="subdued">No locations found</Text>
+                        </Listbox.Option>
+                      </Listbox>
+                    )}
+                  </Combobox>
+                  {selectedLocation && (
+                    <div style={{ marginTop: '8px', padding: '12px', backgroundColor: '#f6f6f7', borderRadius: '6px' }}>
+                      <Text variant="bodyMd" fontWeight="medium">
+                        Selected: {selectedLocation.id}
+                      </Text>
+                      <Text variant="bodySm" color="subdued">
+                        {selectedLocation.name}
+                      </Text>
+                      <Button
+                        size="slim"
+                        onClick={() => {
+                          setAssignmentData(prev => ({ ...prev, locationId: "" }));
+                          setAssignmentError(""); // Clear assignment error when clearing selection
+                        }}
+                        style={{ marginTop: '4px' }}
+                      >
+                        Clear Selection
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
               <TextField
                 label="Assigned By"
                 value={assignmentData.assignedBy}
@@ -359,6 +520,11 @@ export default function BudgetManagement() {
                 placeholder="Enter who is making this assignment"
                 helpText="Leave empty for system assignment"
               />
+              {!assignmentData.locationId && (
+                <Text color="critical" variant="bodySm">
+                  Please select a location to assign the budget to.
+                </Text>
+              )}
             </FormLayout>
           </Modal.Section>
         </Modal>
@@ -444,6 +610,7 @@ export default function BudgetManagement() {
         <Frame>
           <Toast
             content={toastMessage}
+            error={toastMessage.toLowerCase().includes('error') || toastMessage.toLowerCase().includes('failed')}
             onDismiss={() => setToastActive(false)}
           />
         </Frame>

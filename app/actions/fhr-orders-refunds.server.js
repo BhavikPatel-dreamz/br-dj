@@ -23,17 +23,37 @@ import mssql from "../mssql.server.js";
  * @returns {Promise<Object>} Object containing products array and summary totals
  */
 
-function generateUniqueRandomNumbers(count, min, max) {
-  if (count > (max - min + 1)) {
-    throw new Error('Count cannot be greater than the range of available numbers.');
+// Helper function to get budget data for categories by location
+async function getBudgetDataForLocation(locationId) {
+  try {
+    const budgetQuery = `
+      SELECT 
+        bcm.category_name,
+        bc.allocated_amount as budget_amount,
+        b.name as budget_name,
+        bla.location_id
+      FROM shopify.budget_location_assignments bla
+      INNER JOIN shopify.budget b ON bla.budget_id = b.id
+      INNER JOIN shopify.budget_categories bc ON b.id = bc.budget_id
+      INNER JOIN shopify.budget_categories_master bcm ON bc.category_id = bcm.id
+      WHERE bla.location_id = @locationId 
+        AND bla.status = 'active'
+        AND b.status = 'active'
+    `;
+    
+    const budgetData = await mssql.query(budgetQuery, { locationId });
+    
+    // Create a map of category_name to budget_amount
+    const budgetMap = {};
+    budgetData.forEach(item => {
+      budgetMap[item.category_name] = item.budget_amount;
+    });
+    
+    return budgetMap;
+  } catch (error) {
+    console.error("Error fetching budget data for location:", error);
+    return {};
   }
-
-  const uniqueNumbers = new Set();
-  while (uniqueNumbers.size < count) {
-    const randomNumber = Math.floor(Math.random() * (max - min + 1)) + min;
-    uniqueNumbers.add(randomNumber);
-  }
-  return Array.from(uniqueNumbers);
 }
 
 export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
@@ -76,7 +96,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
           ol.name as product_name,
           ol.sku,
           ol.vendor,
-          p.product_type,
+          p.shopify_category,
           ol.quantity as ordered_quantity,
           CAST(ol.price AS DECIMAL(10,2)) as unit_price,
           CAST(ol.price AS DECIMAL(10,2)) * ol.quantity as ordered_value,
@@ -104,7 +124,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
         op.product_name,
         op.sku,
         op.vendor,
-        op.product_type,
+        op.shopify_category,
         SUM(op.ordered_quantity) as gross_quantity,
         SUM(COALESCE(rp.total_refunded_quantity, 0)) as refunded_quantity,
         SUM(op.ordered_quantity - COALESCE(rp.total_refunded_quantity, 0)) as net_quantity,
@@ -123,7 +143,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
         op.product_name,
         op.sku,
         op.vendor,
-        op.product_type
+        op.shopify_category
       ORDER BY net_quantity DESC, net_value DESC
     `;
 
@@ -232,27 +252,20 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    
-    // Debug query to check refund data for the filtered period
-    const debugRefundQuery = `
-      SELECT COUNT(*) as total_refunds,
-             COUNT(DISTINCT r.order_id) as orders_with_refunds,
-             SUM(olr.quantity) as total_refunded_quantity,
-             SUM(olr.subtotal) as total_refunded_value
-      FROM brdjdb.shopify.refund AS r
-      INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
-      INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-      ${whereClause}
-    `;
+    // Get budget data for the location
+    let budgetMap = {};
+    if (filters.locationId || filters.companyLocationId) {
+      const locationForBudget = filters.locationId || filters.companyLocationId;
+      budgetMap = await getBudgetDataForLocation(locationForBudget);
+    }
 
-    // Execute debug query first
-   
+    console.log("Budget Map:", budgetMap);
 
     // Enhanced query that calculates net quantities and values by category
     const query = `
       WITH OrderedProducts AS (
         SELECT 
-          COALESCE(p.product_type, 'Uncategorized') as category_name,
+          COALESCE(p.shopify_category, 'Uncategorized') as category_name,
           ol.id as order_line_id,
           ol.product_id,
           ol.variant_id,
@@ -332,17 +345,17 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
         SELECT 
           o.id as order_id,
           SUM(CAST(ol.price AS DECIMAL(10,2)) * ol.quantity) as order_value,
-          COALESCE(p.product_type, 'Uncategorized') as category_name
+          COALESCE(p.shopify_category, 'Uncategorized') as category_name
         FROM brdjdb.shopify.[order] AS o
         INNER JOIN brdjdb.shopify.order_line AS ol ON o.id = ol.order_id
         LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
         ${whereClause}
-        GROUP BY o.id, COALESCE(p.product_type, 'Uncategorized')
+        GROUP BY o.id, COALESCE(p.shopify_category, 'Uncategorized')
       ),
       RefundStats AS (
         SELECT 
           r.order_id,
-          COALESCE(p.product_type, 'Uncategorized') as category_name,
+          COALESCE(p.shopify_category, 'Uncategorized') as category_name,
           SUM(olr.subtotal) as refunded_value
         FROM brdjdb.shopify.refund AS r
         INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
@@ -350,7 +363,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
         LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
         ${whereClause}
-        GROUP BY r.order_id, COALESCE(p.product_type, 'Uncategorized')
+        GROUP BY r.order_id, COALESCE(p.shopify_category, 'Uncategorized')
       )
       SELECT 
         COUNT(DISTINCT os.order_id) as total_orders,
@@ -388,7 +401,8 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
           gross_quantity: 0,
           gross_value: 0,
           refunded_quantity: 0,
-          refunded_value: 0
+          refunded_value: 0,
+          budget: budgetMap[categoryName] || 0 // Set budget from database or 0
         };
       }
       
@@ -412,7 +426,6 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       categorizedData[categoryName].gross_value += product.gross_value || 0;
       categorizedData[categoryName].refunded_quantity += product.refunded_quantity || 0;
       categorizedData[categoryName].refunded_value += product.refunded_value || 0;
-      categorizedData[categoryName].budget = generateUniqueRandomNumbers(1, 5000, 20000)[0]; // Random budget between 5,000 and 20,000
       
       
       
