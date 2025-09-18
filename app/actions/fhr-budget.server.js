@@ -980,12 +980,16 @@ export async function getAllBudgetAssignments() {
         ba.updated_at,
         b.name as budget_name,
         b.total_amount,
+        cp.name as location_name,
         b.status as budget_status
       FROM shopify.budget_location_assignments ba
       INNER JOIN shopify.budget b ON ba.budget_id = b.id
+      INNER JOIN shopify.company_location cp ON ba.location_id = cp.id
       WHERE ba.status = 'active'
       ORDER BY ba.created_at DESC
     `);
+
+    console.log(`Fetched ${assignments.length} total budget assignments`);
 
     return assignments;
   } catch (error) {

@@ -31,70 +31,68 @@ export const loader = async ({ request }) => {
   try {
     console.log("Request received for /api/monthly-orders-by-category");
     const url = new URL(request.url);
-     
-    
 
-    // // Check if this is a Shopify proxy request (has signature parameter)
-    // const signature = url.searchParams.get("signature");
-    // const isShopifyProxyRequest = !!signature;
+    // Check if this is a Shopify proxy request (has signature parameter)
+    const signature = url.searchParams.get("signature");
+    const isShopifyProxyRequest = !!signature;
 
-    // // Also check for explicit secure mode
-    // const requireSecureAuth = isShopifyProxyRequest;
+    // Also check for explicit secure mode
+    const requireSecureAuth = isShopifyProxyRequest;
 
-    // let isAuthenticated = false;
-    // let shopifySession = null;
-    // let customerInfo = null;
+    let isAuthenticated = false;
+    let shopifySession = null;
+    let customerInfo = null;
 
-    // if (!requireSecureAuth && !signature) {
-    //   return json(
-    //     {
-    //       success: false,
-    //       error: "Secure mode is required for this endpoint",
-    //       data: null,
-    //     },
-    //     { status: 400 }
-    //   );
-    // }
+    if (!requireSecureAuth && !signature) {
+      return json(
+        {
+          success: false,
+          error: "Secure mode is required for this endpoint",
+          data: null,
+        },
+        { status: 400 }
+      );
+    }
 
-    // // Validate Shopify proxy signature if present
+    // Validate Shopify proxy signature if present
 
-    // const validation = validateShopifyProxyRequest(
-    //   request,
-    //   process.env.SHOPIFY_API_SECRET,
-    //   true // Require customer login
-    // );
+    const validation = validateShopifyProxyRequest(
+      request,
+      process.env.SHOPIFY_API_SECRET,
+      true // Require customer login
+    );
 
-    // if (!validation.isValid) {
-    //   console.log(
-    //     "Shopify proxy signature validation failed:",
-    //     validation.error
-    //   );
-    //   // Return the prepared response if available
-    //   if (validation.response) {
-    //     return validation.response;
-    //   }
+    if (!validation.isValid) {
+      console.log(
+        "Shopify proxy signature validation failed:",
+        validation.error
+      );
+      // Return the prepared response if available
+      if (validation.response) {
+        return validation.response;
+      }
 
-    //   return createSecureProxyResponse(
-    //     {
-    //       success: false,
-    //       error:
-    //         validation.error ||
-    //         "Invalid signature - secure authentication required",
-    //       data: null,
-    //     },
-    //     { status: 403 }
-    //   );
-    // }
+      return createSecureProxyResponse(
+        {
+          success: false,
+          error:
+            validation.error ||
+            "Invalid signature - secure authentication required",
+          data: null,
+        },
+        { status: 403 }
+      );
+    }
 
-    // // Customer is authenticated and logged in
-    // customerInfo = validation.customerInfo;
-    // isAuthenticated = true;
+    // Customer is authenticated and logged in
+    customerInfo = validation.customerInfo;
+    isAuthenticated = true;
 
-    // console.log("Authenticated Shopify proxy request with logged-in customer", {
-    //   customerId: customerInfo?.customerId,
-    //   shop: customerInfo?.shop || url.searchParams.get("shop"),
-    //   isLoggedIn: customerInfo?.isLoggedIn,
-    // });
+    console.log("Authenticated Shopify proxy request with logged-in customer", {
+      customerId: customerInfo?.customerId,
+      shop: customerInfo?.shop || url.searchParams.get("shop"),
+      isLoggedIn: customerInfo?.isLoggedIn,
+    });
 
     // Parse query parameters
     const customerId = url.searchParams.get("customerId")?.trim() || "";
@@ -176,31 +174,31 @@ export const loader = async ({ request }) => {
           refundRate: result.refundRate || 0,
           month: searchMonth,
           year: searchYear,
-          // isAuthenticated: isAuthenticated,
-          // shopifyUser: isAuthenticated
-          //   ? shopifySession?.shop || customerInfo?.shop || "authenticated"
-          //   : null,
-          // customerInfo: requireSecureAuth
-          //   ? {
-          //       customerId: customerInfo?.customerId || null,
-          //       isLoggedIn: customerInfo?.isLoggedIn || false,
-          //     }
-          //   : null,
+          isAuthenticated: isAuthenticated,
+          shopifyUser: isAuthenticated
+            ? shopifySession?.shop || customerInfo?.shop || "authenticated"
+            : null,
+          customerInfo: requireSecureAuth
+            ? {
+                customerId: customerInfo?.customerId || null,
+                isLoggedIn: customerInfo?.isLoggedIn || false,
+              }
+            : null,
           filters: {
             customerId: customerId || null,
             locationId: locationId || null,
             companyLocationId: companyLocationId || null,
           },
-         // secureMode: requireSecureAuth,
+          secureMode: requireSecureAuth,
           refundAware: true, // Indicates this response includes refund calculations
         },
       },
     };
 
     // Return secure response if secure authentication was used
-    // if (requireSecureAuth) {
-    //   return createSecureProxyResponse(responseData);
-    // }
+    if (requireSecureAuth) {
+      return createSecureProxyResponse(responseData);
+    }
 
     // Standard JSON response for regular requests
     return json(responseData);

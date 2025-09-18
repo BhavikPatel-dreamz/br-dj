@@ -2,6 +2,39 @@ import 'dotenv/config';
 import mssql from "../mssql.server.js";
 
 /**
+ * Decode HTML entities in category names
+ * @param {string} str - The string containing HTML entities
+ * @returns {string} - The decoded string
+ */
+function decodeHtmlEntities(str) {
+  if (!str) return str;
+  
+  const htmlEntities = {
+    '&lt;': '<',
+    '&gt;': '>',
+    '&amp;': '&',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&#x27;': "'",
+    '&#x2F;': '/',
+    '&#x60;': '`',
+    '&#x3D;': '='
+  };
+  
+  // Handle unicode escapes like \u003E
+  let decoded = str.replace(/\\u([0-9a-fA-F]{4})/g, (match, hex) => {
+    return String.fromCharCode(parseInt(hex, 16));
+  });
+  
+  // Handle HTML entities
+  decoded = decoded.replace(/&[#a-zA-Z0-9]+;/g, (entity) => {
+    return htmlEntities[entity] || entity;
+  });
+  
+  return decoded;
+}
+
+/**
  * Orders Actions with Refund Support (Based on Actual Database Schema)
  * Handles Full Historical Records operations for Shopify orders with refund calculations
  * 
@@ -46,6 +79,9 @@ async function getBudgetDataForLocation(locationId) {
     // Create a map of category_name to budget_amount
     const budgetMap = {};
     budgetData.forEach(item => {
+      const decodedCategoryName = decodeHtmlEntities(item.category_name);
+      budgetMap[decodedCategoryName] = item.budget_amount;
+      // Also store the original in case it's needed
       budgetMap[item.category_name] = item.budget_amount;
     });
     
@@ -187,6 +223,12 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
       mssql.query(productSummaryQuery, params)
     ]);
 
+    // Decode HTML entities in shopify_category field for each product
+    const decodedProducts = products.map(product => ({
+      ...product,
+      shopify_category: decodeHtmlEntities(product.shopify_category)
+    }));
+
     const summary = summaryResult[0] || { 
       total_orders: 0, 
       orders_with_refunds: 0,
@@ -197,7 +239,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
     };
 
     return {
-      products,
+      products: decodedProducts,
       totalOrders: summary.total_orders || 0,
       ordersWithRefunds: summary.orders_with_refunds || 0,
       totalProducts: summary.total_products || 0,
@@ -390,7 +432,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
     // Group products by category
     const categorizedData = {};
     productResults.forEach(product => {
-      const categoryName = product.category_name || 'Uncategorized';
+      const categoryName = decodeHtmlEntities(product.category_name || 'Uncategorized');
       
       if (!categorizedData[categoryName]) {
         categorizedData[categoryName] = {

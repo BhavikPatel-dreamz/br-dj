@@ -1,5 +1,5 @@
 import { useNavigate, useSubmit, useNavigation, useActionData, useLoaderData } from "@remix-run/react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { json, redirect } from "@remix-run/node";
 import {
   Page,
@@ -50,6 +50,9 @@ export const loader = async ({ request }) => {
     // Filter assignments
     let filteredAssignments = allAssignments || [];
     
+    console.log("All Assignments:", filteredAssignments);
+
+
     if (searchQuery) {
       filteredAssignments = filteredAssignments.filter(assignment => 
         assignment.budget_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -127,16 +130,22 @@ export const action = async ({ request }) => {
       };
       
       try {
-
         console.log("Assignment Data:", assignmentData);
 
         const result = await assignBudgetToLocation(assignmentData);
         
-        return json({ 
-          success: true, 
-          message: "Budget successfully assigned to location!",
-          assignment: result
-        });
+        if (result.success) {
+          return json({ 
+            success: true, 
+            message: "Budget successfully assigned to location!",
+            assignment: result.data
+          });
+        } else {
+          return json({ 
+            success: false, 
+            error: result.error || "Failed to assign budget to location" 
+          });
+        }
       } catch (error) {
         return json({ 
           success: false, 
@@ -180,23 +189,33 @@ export default function BudgetLocationAssignments() {
 
   const isLoading = navigation.state === "submitting";
 
-  // Handle action data (success/error messages)
-  if (actionData) {
-    if (actionData.success && !toastActive) {
-      setToastMessage(actionData.message);
-      setToastError(false);
-      setToastActive(true);
-      setIsAssignModalOpen(false);
-      // Reset form
-      setSelectedBudget("");
-      setSelectedLocation("");
-      setAssignedBy("");
-    } else if (!actionData.success && !toastActive) {
-      setToastMessage(actionData.error);
-      setToastError(true);
-      setToastActive(true);
+  // Handle action data (success/error messages) with useEffect
+  useEffect(() => {
+    if (actionData) {
+      if (actionData.success) {
+        setToastMessage(actionData.message);
+        setToastError(false);
+        setToastActive(true);
+        setIsAssignModalOpen(false);
+        // Reset form
+        setSelectedBudget("");
+        setSelectedLocation("");
+        setAssignedBy("");
+      } else if (actionData.error) {
+        setToastMessage(actionData.error);
+        setToastError(true);
+        setToastActive(true);
+      }
     }
-  }
+  }, [actionData]);
+
+  const handleModalClose = useCallback(() => {
+    setIsAssignModalOpen(false);
+    // Reset form when closing modal
+    setSelectedBudget("");
+    setSelectedLocation("");
+    setAssignedBy("");
+  }, []);
 
   const handleAssignSubmit = useCallback(() => {
     if (!selectedBudget || !selectedLocation) {
@@ -206,14 +225,29 @@ export default function BudgetLocationAssignments() {
       return;
     }
 
+    // Additional validation
+    if (!budgets.find(b => b.id.toString() === selectedBudget)) {
+      setToastMessage("Selected budget is not valid");
+      setToastError(true);
+      setToastActive(true);
+      return;
+    }
+
+    if (!locations.find(l => l.id === selectedLocation)) {
+      setToastMessage("Selected location is not valid");
+      setToastError(true);
+      setToastActive(true);
+      return;
+    }
+
     const formData = new FormData();
     formData.append("actionType", "assign");
     formData.append("budget_id", selectedBudget);
     formData.append("location_id", selectedLocation);
-    formData.append("assigned_by", assignedBy);
+    formData.append("assigned_by", assignedBy || "system");
 
     submit(formData, { method: "post" });
-  }, [selectedBudget, selectedLocation, assignedBy, submit]);
+  }, [selectedBudget, selectedLocation, assignedBy, submit, budgets, locations]);
 
   const handleFiltersQueryChange = useCallback((value) => {
     setSearchValue(value);
@@ -283,7 +317,9 @@ export default function BudgetLocationAssignments() {
   const tableRows = assignments.map(assignment => [
     assignment.budget_name || "Unknown Budget",
     `$${assignment.total_amount?.toLocaleString() || "0"}`,
-    assignment.location_id,
+    assignment.location_id && assignment.location_name
+      ? `${assignment.location_id} - ${assignment.location_name}`
+      : assignment.location_id || "Unknown Location",
     <Badge 
       key={assignment.id}
       status={assignment.status === "active" ? "success" : "critical"}
@@ -399,7 +435,7 @@ export default function BudgetLocationAssignments() {
                   headings={[
                     "Budget Name",
                     "Budget Total", 
-                    "Location ID",
+                    "Location ID & Name",
                     "Status",
                     "Assigned By",
                     "Assigned Date"
@@ -425,17 +461,18 @@ export default function BudgetLocationAssignments() {
 
         <Modal
           open={isAssignModalOpen}
-          onClose={() => setIsAssignModalOpen(false)}
+          onClose={handleModalClose}
           title="Assign Budget to Location"
           primaryAction={{
             content: "Assign",
             onAction: handleAssignSubmit,
             loading: isLoading,
+            disabled: !selectedBudget || !selectedLocation,
           }}
           secondaryActions={[
             {
               content: "Cancel",
-              onAction: () => setIsAssignModalOpen(false),
+              onAction: handleModalClose,
             },
           ]}
         >

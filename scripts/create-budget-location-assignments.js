@@ -11,7 +11,7 @@ async function createBudgetLocationAssignmentsTable() {
       CREATE TABLE shopify.budget_location_assignments (
           id BIGINT IDENTITY(1,1) PRIMARY KEY,
           budget_id BIGINT NOT NULL,
-          location_id NVARCHAR(255) NOT NULL,
+          location_id BIGINT NOT NULL,
           status NVARCHAR(50) NOT NULL DEFAULT 'active',
           assigned_by NVARCHAR(255) NULL,
           created_at DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
