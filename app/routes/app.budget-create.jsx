@@ -13,6 +13,8 @@ import {
   FormLayout,
   Select,
   Icon,
+  Frame,
+  Toast,
 } from "@shopify/polaris";
 import { DeleteIcon } from "@shopify/polaris-icons";
 import { TitleBar } from "@shopify/app-bridge-react";
@@ -65,7 +67,7 @@ export const action = async ({ request }) => {
       const newBudget = await createBudget(budgetData);
       
       // Redirect back to the budget list after successful creation
-      return json({ success: true, message: "Budget created successfully" });
+      return json({ success: true, message: "Budget created successfully", budget: newBudget });
       //return redirect("/app");
     } else if (actionType === "update") {
       const budgetId = formData.get("budgetId");
@@ -94,7 +96,8 @@ export default function BudgetForm() {
   const navigation = useNavigation();
   const actionData = useActionData();
   const { categories: availableCategories, budgetData, isEditMode } = useLoaderData();
-
+  const [toastActive, setToastActive] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
   const [budgetName, setBudgetName] = useState("");
   const [budgetDescription, setBudgetDescription] = useState("");
   const [budgetRows, setBudgetRows] = useState([
@@ -102,6 +105,20 @@ export default function BudgetForm() {
   ]);
 
   const isLoading = navigation.state === "submitting";
+
+  useEffect(() => { 
+    if(actionData?.success && actionData?.budget){ 
+      setToastMessage(actionData.message);
+        setToastActive(true);
+      
+      setTimeout(() => {
+      navigate("/app");  
+      }, 1500);
+      
+      
+    }
+  },[actionData])
+
 
   // Populate form data when in edit mode
   useEffect(() => {
@@ -413,6 +430,14 @@ export default function BudgetForm() {
           </Card>
         </Layout.Section>
       </Layout>
+      {toastActive && (
+              <Frame>
+                <Toast
+                  content={toastMessage}
+                  onDismiss={() => setToastActive(false)}
+                />
+              </Frame>
+            )}
     </Page>
   );
 }
