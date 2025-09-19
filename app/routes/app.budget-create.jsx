@@ -65,7 +65,8 @@ export const action = async ({ request }) => {
       const newBudget = await createBudget(budgetData);
       
       // Redirect back to the budget list after successful creation
-      return redirect("/app");
+      return json({ success: true, message: "Budget created successfully" });
+      //return redirect("/app");
     } else if (actionType === "update") {
       const budgetId = formData.get("budgetId");
       const budgetData = {
@@ -245,7 +246,7 @@ export default function BudgetForm() {
                     loading={isLoading}
                     disabled={!isFormValid()}
                   >
-                    {isEditMode ? "Update Budget" : "Create Budget"}
+                    {isEditMode ? "Update Budget" : "Create Budget"} ({formatCurrency(calculateTotal())})
                   </Button>
                 </InlineStack>
               </InlineStack>
@@ -314,16 +315,16 @@ export default function BudgetForm() {
                             placeholder="Select category"
                             error={index > 0 && !row.categoryId ? "Please select a category" : undefined}
                           />
-                          {categoryData && (
+                          {/* {categoryData && (
                             <Text variant="bodySm" tone="subdued">
                               {categoryData.parent_category || 'General'} Department
                             </Text>
-                          )}
+                          )} */}
                         </div>
                         
                         <div style={{ flex: 1 }}>
                           <TextField
-                            label={index === 0 ? "Amount" : ""}
+                            label={index === 0 ? "PPD" : ""}
                             labelHidden={index !== 0}
                             type="number"
                             value={row.amount}
