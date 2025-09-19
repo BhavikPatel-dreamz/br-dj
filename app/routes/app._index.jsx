@@ -1,5 +1,5 @@
 import { json, redirect } from "@remix-run/node";
-import { useLoaderData, useActionData, useSubmit, useNavigation, Form, Link } from "@remix-run/react";
+import { useLoaderData, useActionData, useSubmit, useNavigation, Form, Link, useNavigate } from "@remix-run/react";
 import {
   Page,
   Card,
@@ -69,6 +69,7 @@ export default function BudgetManagement() {
   const actionData = useActionData();
   const submit = useSubmit();
   const navigation = useNavigation();
+  const navigate = useNavigate();
   
   // State management
   const [selectedBudget, setSelectedBudget] = useState(null);
@@ -270,7 +271,7 @@ export default function BudgetManagement() {
             heading="No budgets found"
             action={{
               content: "Create Budget",
-              url: "/app/budget-create"
+              onAction: () => navigate("/app/budget-create")
             }}
             image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
           >
@@ -283,16 +284,16 @@ export default function BudgetManagement() {
     const tableRows = budgets.map((budget) => [
       budget.name || "Unnamed",
       budget.amount,
-      budget.period || "N/A",
+      //budget.period || "N/A",
       <Badge status={budget.status === "active" ? "success" : "attention"}>
-        {budget.status || "Unknown"}
+         {budget.status || "Unknown"} 
       </Badge>,
      // budget.start_date ? new Date(budget.start_date).toLocaleDateString() : "N/A",
       //budget.end_date ? new Date(budget.end_date).toLocaleDateString() : "N/A",
       <InlineStack align="end" gap="200">
         <Button 
           size="slim" 
-          url={`/app/budget-create?id=${budget.id}`}
+          onClick={() => navigate(`/app/budget-create?id=${budget.id}`)}
         >
           Edit
         </Button>
@@ -314,21 +315,21 @@ export default function BudgetManagement() {
         <DataTable
           columnContentTypes={[
             'text',
+            'text',
+           // 'text',
+            'text',
            // 'text',
            // 'text',
-            'text',
-            'text',
-            'text',
             'text'
           ]}
           headings={[
             'Budget Name',
             'Amount',
-            'Period',
+            //'Period',
             'Status',
             //'Start Date',
             //'End Date',
-            'Actions'
+            ''
           ]}
           rows={tableRows}
         />
@@ -541,7 +542,7 @@ export default function BudgetManagement() {
       subtitle={`Managing ${totalBudgets} budget${totalBudgets !== 1 ? 's' : ''}`}
       primaryAction={{
         content: "Create Budget",
-        url: "/app/budget-create"
+        onAction: () => navigate("/app/budget-create")
       }}
     >
       {error && (
@@ -556,7 +557,6 @@ export default function BudgetManagement() {
             <FormLayout>
               <FormLayout.Group>
                 <TextField
-                  label="Search budgets"
                   value={searchValue}
                   onChange={setSearchValue}
                   placeholder="Search by name or description"
@@ -565,20 +565,23 @@ export default function BudgetManagement() {
                 />
                 <div style={{ alignSelf: 'end' }}>
                   <InlineStack gap="200">
+                  
                     <Button onClick={handleFilterChange} loading={isLoading}>
-                      Apply Filters
+                      Search
                     </Button>
-                    <Button 
-                      onClick={() => {
-                        setSearchValue("");
-                        const params = new URLSearchParams();
-                        params.set("page", "1");
+                    {searchValue && (
+                      <Button
+                        onClick={() => {
+                          setSearchValue("");
+                          const params = new URLSearchParams();
+                          params.set("page", "1");
                         submit(params, { method: "get" });
                       }}
                       disabled={!searchValue}
                     >
-                      Clear Filters
+                      Clear
                     </Button>
+                    )}
                   </InlineStack>
                 </div>
               </FormLayout.Group>

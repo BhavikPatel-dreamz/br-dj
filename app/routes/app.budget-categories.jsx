@@ -283,10 +283,10 @@ export default function BudgetCategoriesManagement() {
   const tableHeaders = [
     { content: "ID", key: "id" },
     { content: "Category Name", key: "category_name" },
-    { content: "Code", key: "category_code" },
+    //{ content: "Code", key: "category_code" },
     { content: "Description", key: "description" },
-    { content: "Sort Order", key: "sort_order" },
-    { content: "Status", key: "status" },
+  //  { content: "Sort Order", key: "sort_order" },
+   // { content: "Status", key: "status" },
     { content: "Actions", key: "actions" },
   ];
 
@@ -295,7 +295,7 @@ export default function BudgetCategoriesManagement() {
     <Button variant='plain' onClick={() => openEditModal(category)}>
       {category.category_name}
     </Button>,
-    category.category_code || "-",
+    //category.category_code || "-",
     <div
       style={{
         maxWidth: "200px",
@@ -305,10 +305,10 @@ export default function BudgetCategoriesManagement() {
     >
       {category.description || "-"}
     </div>,
-    category.sort_order || 0,
-    <Badge status={category.is_active ? "success" : "critical"}>
-      {category.is_active ? "Active" : "Inactive"}
-    </Badge>,
+   // category.sort_order || 0,
+    // <Badge status={category.is_active ? "success" : "critical"}>
+    //   {category.is_active ? "Active" : "Inactive"}
+    // </Badge>,
     <ButtonGroup segmented>
       <Tooltip content='Edit category'>
         <Button onClick={() => openEditModal(category)} size='slim'>
@@ -355,12 +355,12 @@ export default function BudgetCategoriesManagement() {
           content: "Create Category",
           onAction: openCreateModal,
         }}
-        secondaryActions={[
-          {
-            content: "Back to Budget Management",
-            url: "/app",
-          },
-        ]}
+        // secondaryActions={[
+        //   {
+        //     content: "Back to Budget Management",
+        //     url: "/app",
+        //   },
+        // ]}
       >
         {error && (
           <Banner status='critical' title='Error loading categories'>
@@ -399,11 +399,11 @@ export default function BudgetCategoriesManagement() {
                 <DataTable
                   columnContentTypes={[
                     "text",
+                    //"text",
                     "text",
                     "text",
-                    "text",
-                    "numeric",
-                    "text",
+                    //"numeric",
+                    //"text",
                     "text",
                   ]}
                   headings={tableHeaders.map((header) => (

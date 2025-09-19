@@ -503,9 +503,15 @@ export async function createBudget(budgetData) {
  */
 export async function getBudgetById(budgetId) {
   try {
+    // Ensure budgetId is treated as a number for the database query
+    const id = parseInt(budgetId, 10);
+    if (isNaN(id)) {
+      throw new Error("Invalid budget ID");
+    }
+
     const budget = await mssql.query(`
       SELECT * FROM shopify.budget WHERE id = @budgetId
-    `, { budgetId });
+    `, { budgetId: id });
 
     if (!budget || budget.length === 0) {
       throw new Error("Budget not found");
@@ -523,7 +529,7 @@ export async function getBudgetById(budgetId) {
       INNER JOIN shopify.budget_categories_master bcm ON bc.category_id = bcm.id
       WHERE bc.budget_id = @budgetId
       ORDER BY bcm.parent_category, bcm.category_name
-    `, { budgetId });
+    `, { budgetId: id });
 
     const budgetData = budget[0];
     budgetData.categories = categories.reduce((acc, cat) => {
@@ -756,7 +762,7 @@ export async function deleteBudget(budgetId) {
       return { success: false, error: "Cannot delete budget that has active location assignments. Please remove assignments first." };
     }
 
-    const result = await mssql.query(`
+    const result = await mssql.execute(`
       DELETE FROM shopify.budget WHERE id = @budgetId
     `, { budgetId });
 
@@ -1005,7 +1011,7 @@ export async function getAllBudgetAssignments() {
  */
 export async function removeBudgetAssignment(assignmentId) {
   try {
-    const result = await mssql.query(`
+    const result = await mssql.execute(`
       UPDATE shopify.budget_location_assignments 
       SET status = 'inactive', updated_at = GETUTCDATE()
       WHERE id = @assignmentId
