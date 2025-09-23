@@ -18,7 +18,7 @@ if (
   delete process.env.HOST;
 }
 
-const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost" || 'https://067b5ceba229.ngrok-free.app' )
+const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost" || 'bhavik.dynamicdreamz.com' || 'https://bhavik.dynamicdreamz.com'  )
   .hostname;
 let hmrConfig;
 

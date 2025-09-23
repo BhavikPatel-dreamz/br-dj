@@ -5,7 +5,7 @@ import {
   validateShopifyProxyRequest,
   createSecureProxyResponse,
 } from "../utils/shopify-security.server.js";
-import { getMonthlyOrderProductsByCategoryWithRefunds } from "../actions/index.server.js";
+import { getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth } from "../actions/index.server.js";
 
 
 /**
@@ -157,7 +157,7 @@ export const loader = async ({ request }) => {
     filters.month = searchMonth;
     filters.year = searchYear;
 
-    const result = await getMonthlyOrderProductsByCategoryWithRefunds(filters);
+    const result = await getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(filters);
 
     const responseData = {
       success: true,

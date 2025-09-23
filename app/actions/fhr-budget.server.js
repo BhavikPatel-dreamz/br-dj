@@ -122,10 +122,10 @@ export function validateBudgetCategories(categories, validCategoriesData = null)
   if (!validCategoriesData) {
     for (const [category, value] of Object.entries(categories)) {
       // Check if category is in predefined list
-      if (!BUDGET_CATEGORIES.includes(category)) {
-        errors.push(`Invalid category: ${category}`);
-        continue;
-      }
+      // if (!BUDGET_CATEGORIES.includes(category)) {
+      //   errors.push(`Invalid category: ${category}`);
+      //   continue;
+      // }
 
       // Validate value is a positive number
       const numValue = parseFloat(value);
@@ -364,8 +364,8 @@ export async function createSimpleBudget(budgetData) {
           .input('categoryId', categoryId)
           .input('allocatedAmount', amount)
           .query(`
-            INSERT INTO shopify.budget_categories (budget_id, category_id, allocated_amount, remaining_amount)
-            VALUES (@budgetId, @categoryId, @allocatedAmount, @allocatedAmount)
+            INSERT INTO shopify.budget_categories (budget_id, category_id, allocated_amount)
+            VALUES (@budgetId, @categoryId, @allocatedAmount)
           `);
       }
 
@@ -625,7 +625,6 @@ export async function updateSimpleBudget(budgetId, updateData) {
               SET 
                 category_id = @categoryId,
                 allocated_amount = @allocatedAmount,
-                remaining_amount = @allocatedAmount,
                 updated_at = GETUTCDATE()
               WHERE budget_id = @budgetId
             `);
@@ -636,8 +635,8 @@ export async function updateSimpleBudget(budgetId, updateData) {
             .input('categoryId', categoryId)
             .input('allocatedAmount', amount)
             .query(`
-              INSERT INTO shopify.budget_categories (budget_id, category_id, allocated_amount, remaining_amount)
-              VALUES (@budgetId, @categoryId, @allocatedAmount, @allocatedAmount)
+              INSERT INTO shopify.budget_categories (budget_id, category_id, allocated_amount)
+              VALUES (@budgetId, @categoryId, @allocatedAmount)
             `);
         }
       }
@@ -671,47 +670,62 @@ export async function updateBudget(budgetId, updateData) {
     try {
       await transaction.begin();
 
-      // Update budget basic info
-      if (updateData.name || updateData.description || updateData.status) {
-        await transaction.request()
-          .input('budgetId', budgetId)
-          .input('name', updateData.name)
-          .input('description', updateData.description)
-          .input('status', updateData.status)
-          .query(`
-            UPDATE shopify.budget 
-            SET 
-              name = COALESCE(@name, name),
-              description = COALESCE(@description, description),
-              status = COALESCE(@status, status),
-              updated_at = GETUTCDATE()
-            WHERE id = @budgetId
-          `);
-      }
+      let totalAmount = null;
 
       // Update categories if provided
       if (updateData.categories) {
-        const validation = validateBudgetCategories(updateData.categories);
+        // Get valid categories from database for validation (same as createBudget)
+        const validCategoriesData = await getBudgetCategoriesFromDB();
+
+        // Validate categories with database data
+        const validation = validateBudgetCategories(updateData.categories, validCategoriesData);
         if (!validation.isValid) {
           throw new Error(`Invalid categories: ${validation.errors.join(', ')}`);
         }
+
+        // Calculate total budget amount
+        totalAmount = Object.values(validation.validCategories)
+          .reduce((sum, categoryData) => sum + parseFloat(categoryData.amount || categoryData), 0);
 
         // Delete existing categories
         await transaction.request()
           .input('budgetId', budgetId)
           .query('DELETE FROM shopify.budget_categories WHERE budget_id = @budgetId');
 
-        // Insert new categories
-        for (const [categoryName, amount] of Object.entries(validation.validCategories)) {
+        // Insert new categories using category IDs (same as createBudget)
+        for (const [categoryKey, categoryData] of Object.entries(validation.validCategories)) {
+          const categoryId = categoryData.categoryId || categoryKey;
+          const amount = parseFloat(categoryData.amount || categoryData);
+          
           await transaction.request()
             .input('budgetId', budgetId)
-            .input('categoryName', categoryName)
-            .input('allocatedAmount', parseFloat(amount))
+            .input('categoryId', categoryId)
+            .input('allocatedAmount', amount)
             .query(`
-              INSERT INTO shopify.budget_categories (budget_id, category_name, allocated_amount)
-              VALUES (@budgetId, @categoryName, @allocatedAmount)
+              INSERT INTO shopify.budget_categories (budget_id, category_id, allocated_amount)
+              VALUES (@budgetId, @categoryId, @allocatedAmount)
             `);
         }
+      }
+
+      // Update budget basic info (including total_amount if categories were updated)
+      if (updateData.name || updateData.description || updateData.status || totalAmount !== null) {
+        await transaction.request()
+          .input('budgetId', budgetId)
+          .input('name', updateData.name)
+          .input('description', updateData.description)
+          .input('status', updateData.status)
+          .input('totalAmount', totalAmount)
+          .query(`
+            UPDATE shopify.budget 
+            SET 
+              name = COALESCE(@name, name),
+              description = COALESCE(@description, description),
+              status = COALESCE(@status, status),
+              total_amount = COALESCE(@totalAmount, total_amount),
+              updated_at = GETUTCDATE()
+            WHERE id = @budgetId
+          `);
       }
 
       await transaction.commit();

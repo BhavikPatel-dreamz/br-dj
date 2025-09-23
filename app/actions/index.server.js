@@ -82,6 +82,7 @@ export {
 // FHR Orders with Refunds Actions
 export {
   getMonthlyOrderProductsByCategoryWithRefunds,
-  getMonthlyOrderProductsWithRefunds
+  getMonthlyOrderProductsWithRefunds,
+  getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth
 } from './fhr-orders-refunds.server.js';
 

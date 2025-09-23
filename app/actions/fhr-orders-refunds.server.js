@@ -499,3 +499,272 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
     throw new Error(`Failed to fetch monthly order products by category with refunds: ${error.message}`);
   }
 }
+
+/**
+ * Get monthly order products summary grouped by category with refunds accounted for (Budget Month Based)
+ * This function uses order_budget_month field instead of created_at for period determination
+ * @param {Object} filters - Filter criteria
+ * @param {string} filters.customerId - Customer ID filter
+ * @param {string} filters.locationId - Location ID filter
+ * @param {string} filters.companyLocationId - Company Location ID filter
+ * @param {string} filters.budgetMonth - Budget month period (MM-YYYY format, e.g., "01-2025")
+ * @returns {Promise<Object>} Object containing categories array and summary totals
+ */
+export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(filters = {}) {
+  try {
+    const conditions = [];
+    const params = {};
+    
+    // Build dynamic WHERE conditions for orders
+    if (filters.customerId) {
+      conditions.push('o.customer_id = @customerId');
+      params.customerId = filters.customerId;
+    }
+    if (filters.locationId) {
+      conditions.push('o.location_id = @locationId');
+      params.locationId = filters.locationId;
+    }
+    if (filters.companyLocationId) {
+      conditions.push('o.company_location_id = @companyLocationId');
+      params.companyLocationId = filters.companyLocationId;
+    }
+
+    // Add budget month filter with fallback to created_at - this is the key difference from the original function
+    if (filters.budgetMonth) {
+      // Parse the budget month to extract month and year for fallback
+      const [month, year] = filters.budgetMonth.split('-');
+      const paddedMonth = month.padStart(2, '0');
+      const fallbackBudgetMonth = `${paddedMonth}-${year}`;
+      
+      conditions.push(`(
+        o.order_budget_month = @budgetMonth 
+        OR (
+          o.order_budget_month IS NULL 
+          AND FORMAT(o.created_at, 'MM-yyyy') = @fallbackBudgetMonth
+        )
+      )`);
+      params.budgetMonth = filters.budgetMonth;
+      params.fallbackBudgetMonth = fallbackBudgetMonth;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Get budget data for the location
+    let budgetMap = {};
+    if (filters.locationId || filters.companyLocationId) {
+      const locationForBudget = filters.locationId || filters.companyLocationId;
+      budgetMap = await getBudgetDataForLocation(locationForBudget);
+    }
+
+    console.log("Budget Map:", budgetMap);
+    console.log("Budget Month Filter:", filters.budgetMonth);
+    console.log("Fallback Budget Month:", params.fallbackBudgetMonth);
+
+    // Enhanced query that calculates net quantities and values by category using budget month
+    const query = `
+      WITH OrderedProducts AS (
+        SELECT 
+          COALESCE(p.shopify_category, 'Uncategorized') as category_name,
+          ol.id as order_line_id,
+          ol.product_id,
+          ol.variant_id,
+          ol.name as product_name,
+          ol.sku,
+          ol.vendor,
+          ol.quantity as ordered_quantity,
+          CAST(ol.price AS DECIMAL(10,2)) as unit_price,
+          CAST(ol.price AS DECIMAL(10,2)) * ol.quantity as ordered_value,
+          o.id as order_id,
+          o.order_budget_month,
+          o.created_at
+        FROM brdjdb.shopify.[order] AS o
+        INNER JOIN brdjdb.shopify.order_line AS ol ON o.id = ol.order_id
+        LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
+        ${whereClause}
+      ),
+      RefundedProducts AS (
+        -- Get all refunded products for orders from the same budget period (refunds can be from any date)
+        SELECT 
+          olr.order_line_id,
+          SUM(olr.quantity) as total_refunded_quantity,
+          SUM(olr.subtotal) as total_refunded_value
+        FROM brdjdb.shopify.order_line_refund AS olr
+        INNER JOIN brdjdb.shopify.refund AS r ON olr.refund_id = r.id
+        INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
+        INNER JOIN OrderedProducts op ON olr.order_line_id = op.order_line_id
+        GROUP BY olr.order_line_id
+      ),
+      ProductSummary AS (
+        SELECT 
+          op.category_name,
+          op.product_id,
+          op.variant_id,
+          op.product_name,
+          op.sku,
+          op.vendor,
+          SUM(op.ordered_quantity) as gross_quantity,
+          SUM(COALESCE(rp.total_refunded_quantity, 0)) as refunded_quantity,
+          SUM(op.ordered_quantity - COALESCE(rp.total_refunded_quantity, 0)) as net_quantity,
+          SUM(op.ordered_value) as gross_value,
+          SUM(COALESCE(rp.total_refunded_value, 0)) as refunded_value,
+          SUM(op.ordered_value - COALESCE(rp.total_refunded_value, 0)) as net_value,
+          AVG(op.unit_price) as average_price,
+          COUNT(DISTINCT op.order_id) as order_count
+        FROM OrderedProducts op
+        LEFT JOIN RefundedProducts rp ON op.order_line_id = rp.order_line_id
+        GROUP BY 
+          op.category_name,
+          op.product_id,
+          op.variant_id,
+          op.product_name,
+          op.sku,
+          op.vendor
+      )
+      SELECT 
+        category_name,
+        product_id,
+        variant_id,
+        product_name,
+        sku,
+        vendor,
+        net_quantity as total_quantity,
+        net_value as total_price,
+        average_price,
+        order_count,
+        gross_quantity,
+        refunded_quantity,
+        gross_value,
+        refunded_value
+      FROM ProductSummary
+      ORDER BY category_name, net_quantity DESC, net_value DESC
+    `;
+
+    // Summary query for categories with proper refund aggregation using budget month
+    const categorySummaryQuery = `
+      WITH OrderStats AS (
+        SELECT 
+          o.id as order_id,
+          SUM(CAST(ol.price AS DECIMAL(10,2)) * ol.quantity) as order_value,
+          COALESCE(p.shopify_category, 'Uncategorized') as category_name,
+          o.order_budget_month
+        FROM brdjdb.shopify.[order] AS o
+        INNER JOIN brdjdb.shopify.order_line AS ol ON o.id = ol.order_id
+        LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
+        ${whereClause}
+        GROUP BY o.id, COALESCE(p.shopify_category, 'Uncategorized'), o.order_budget_month
+      ),
+      RefundStats AS (
+        SELECT 
+          r.order_id,
+          COALESCE(p.shopify_category, 'Uncategorized') as category_name,
+          SUM(olr.subtotal) as refunded_value
+        FROM brdjdb.shopify.refund AS r
+        INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
+        INNER JOIN brdjdb.shopify.order_line AS ol ON olr.order_line_id = ol.id
+        INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
+        LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
+        ${whereClause}
+        GROUP BY r.order_id, COALESCE(p.shopify_category, 'Uncategorized')
+      )
+      SELECT 
+        COUNT(DISTINCT os.order_id) as total_orders,
+        COUNT(DISTINCT CASE WHEN rs.order_id IS NOT NULL THEN os.order_id END) as orders_with_refunds,
+        COUNT(DISTINCT os.category_name) as total_categories,
+        SUM(os.order_value) as gross_value,
+        SUM(COALESCE(rs.refunded_value, 0)) as total_refunded_value,
+        SUM(os.order_value - COALESCE(rs.refunded_value, 0)) as net_value
+      FROM OrderStats os
+      LEFT JOIN RefundStats rs ON os.order_id = rs.order_id AND os.category_name = rs.category_name
+    `;
+
+    // Execute both queries
+    const [productResults, summaryResult] = await Promise.all([
+      mssql.query(query, params),
+      mssql.query(categorySummaryQuery, params)
+    ]);
+
+    // Group products by category
+    const categorizedData = {};
+    productResults.forEach(product => {
+      const categoryName = decodeHtmlEntities(product.category_name || 'Uncategorized');
+      
+      if (!categorizedData[categoryName]) {
+        categorizedData[categoryName] = {
+          category_name: categoryName,
+          products: [],
+          total_quantity: 0,
+          total_value: 0,
+          gross_quantity: 0,
+          gross_value: 0,
+          refunded_quantity: 0,
+          refunded_value: 0,
+          budget: budgetMap[categoryName] || 0 // Set budget from database or 0
+        };
+      }
+      
+      categorizedData[categoryName].products.push({
+        product_name: product.product_name,
+        sku: product.sku,
+        vendor: product.vendor,
+        total_quantity: product.total_quantity,
+        total_price: product.total_price,
+        average_price: product.average_price,
+        order_count: product.order_count,
+        gross_quantity: product.gross_quantity,
+        refunded_quantity: product.refunded_quantity,
+        gross_value: product.gross_value,
+        refunded_value: product.refunded_value
+      });
+      
+      categorizedData[categoryName].total_quantity += product.total_quantity || 0;
+      categorizedData[categoryName].total_value += product.total_price || 0;
+      categorizedData[categoryName].gross_quantity += product.gross_quantity || 0;
+      categorizedData[categoryName].gross_value += product.gross_value || 0;
+      categorizedData[categoryName].refunded_quantity += product.refunded_quantity || 0;
+      categorizedData[categoryName].refunded_value += product.refunded_value || 0;
+    });
+
+    // Add budget categories that have no orders in this period
+    Object.keys(budgetMap).forEach(budgetCategoryName => {
+      if (!categorizedData[budgetCategoryName]) {
+        categorizedData[budgetCategoryName] = {
+          category_name: budgetCategoryName,
+          products: [],
+          total_quantity: 0,
+          total_value: 0,
+          gross_quantity: 0,
+          gross_value: 0,
+          refunded_quantity: 0,
+          refunded_value: 0,
+          budget: budgetMap[budgetCategoryName]
+        };
+      }
+    });
+
+    const categories = Object.values(categorizedData);
+    const summary = summaryResult[0] || { 
+      total_orders: 0, 
+      orders_with_refunds: 0,
+      total_categories: 0, 
+      gross_value: 0,
+      total_refunded_value: 0,
+      net_value: 0
+    };
+
+    return {
+      categories,
+      totalOrders: summary.total_orders || 0,
+      ordersWithRefunds: summary.orders_with_refunds || 0,
+      totalCategories: summary.total_categories || 0,
+      grossValue: summary.gross_value || 0,
+      refundedValue: summary.total_refunded_value || 0,
+      totalValue: summary.net_value || 0, // Net value after refunds
+      refundRate: summary.total_orders > 0 ? (summary.orders_with_refunds / summary.total_orders * 100) : 0,
+      budgetMonth: filters.budgetMonth // Return the budget month used for filtering
+    };
+
+  } catch (error) {
+    console.error("Error fetching monthly order products by category with refunds (budget month):", error);
+    throw new Error(`Failed to fetch monthly order products by category with refunds (budget month): ${error.message}`);
+  }
+}

@@ -69,7 +69,8 @@ export const action = async ({ request }) => {
       // Redirect back to the budget list after successful creation
       return json({ success: true, message: "Budget created successfully", budget: newBudget });
       //return redirect("/app");
-    } else if (actionType === "update") {
+    } else if (actionType === "update") 
+      {
       const budgetId = formData.get("budgetId");
       const budgetData = {
         name: formData.get("name"),
