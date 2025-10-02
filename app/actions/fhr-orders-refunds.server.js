@@ -82,6 +82,7 @@ async function getBudgetDataForLocation(locationId, budgetMonth = null) {
     
     const budgetData = await mssql.query(budgetQuery, { locationId });
     
+    
     // Create a map of category_name to budget_amount
     const budgetMap = {};
     budgetData.forEach(item => {
@@ -110,7 +111,7 @@ async function calculateBudgetFromCensus(locationId, budgetMonth) {
     `;
     
     const censusData = await mssql.query(censusQuery, { 
-      locationId: locationId.toString(), 
+      locationId, 
       budgetMonth 
     });
     
@@ -144,6 +145,7 @@ async function calculateBudgetFromCensus(locationId, budgetMonth) {
     // Calculate budget for each category using the formula:
     // BUDGET OF CATEGORY = CENSUS OF LOCATION × DAYS OF THE CURRENT MONTH × PPD
     const budgetMap = {};
+    //console.log(categoriesData)
     
     categoriesData.forEach(category => {
       const decodedCategoryName = decodeHtmlEntities(category.category_name);
@@ -157,9 +159,9 @@ async function calculateBudgetFromCensus(locationId, budgetMonth) {
       budgetMap[category.category_name] = calculatedBudget;
     });
     
-    console.log(`Budget calculation for location ${locationId}, month ${budgetMonth}:`);
-    console.log(`Census: ${censusAmount}, Days: ${daysInMonth}`);
-    console.log('Calculated budgets:', budgetMap);
+    // console.log(`Budget calculation for location ${locationId}, month ${budgetMonth}:`);
+    // console.log(`Census: ${censusAmount}, Days: ${daysInMonth}`);
+     console.log('Calculated budgets:', budgetMap);
     
     return budgetMap;
     
@@ -636,9 +638,12 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       budgetMap = await getBudgetDataForLocation(locationForBudget, filters.budgetMonth);
     }
 
-    console.log("Budget Map:", budgetMap);
-    console.log("Budget Month Filter:", filters.budgetMonth);
-    console.log("Fallback Budget Month:", params.fallbackBudgetMonth);
+     console.log("Budget Map:", budgetMap);
+    // console.log("Budget Month Filter:", filters.budgetMonth);
+    // console.log("Fallback Budget Month:", params.fallbackBudgetMonth);
+    // console.log("Where Clause:", whereClause);
+    // console.log("Query Params:", conditions);
+
 
     // Enhanced query that calculates net quantities and values by category using budget month
     const query = `
@@ -796,12 +801,12 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
         refunded_value: product.refunded_value
       });
       
-      categorizedData[categoryName].total_quantity += product.total_quantity || 0;
-      categorizedData[categoryName].total_value += product.total_price || 0;
-      categorizedData[categoryName].gross_quantity += product.gross_quantity || 0;
-      categorizedData[categoryName].gross_value += product.gross_value || 0;
-      categorizedData[categoryName].refunded_quantity += product.refunded_quantity || 0;
-      categorizedData[categoryName].refunded_value += product.refunded_value || 0;
+      categorizedData[categoryName].total_quantity += parseFloat(product.total_quantity) || 0;
+      categorizedData[categoryName].total_value += parseFloat(product.total_price) || 0;
+      categorizedData[categoryName].gross_quantity += parseFloat(product.gross_quantity) || 0;
+      categorizedData[categoryName].gross_value += parseFloat(product.gross_value) || 0;
+      categorizedData[categoryName].refunded_quantity += parseFloat(product.refunded_quantity) || 0;
+      categorizedData[categoryName].refunded_value += parseFloat(product.refunded_value) || 0;
     });
 
     // Add budget categories that have no orders in this period
