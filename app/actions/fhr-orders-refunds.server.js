@@ -57,8 +57,14 @@ function decodeHtmlEntities(str) {
  */
 
 // Helper function to get budget data for categories by location
-async function getBudgetDataForLocation(locationId) {
+async function getBudgetDataForLocation(locationId, budgetMonth = null) {
   try {
+    // If budgetMonth is provided, calculate budget using census data
+    if (budgetMonth && locationId) {
+      return await calculateBudgetFromCensus(locationId, budgetMonth);
+    }
+    
+    // Fallback to static budget data if no budget month provided
     const budgetQuery = `
       SELECT 
         bcm.category_name,
@@ -88,6 +94,77 @@ async function getBudgetDataForLocation(locationId) {
     return budgetMap;
   } catch (error) {
     console.error("Error fetching budget data for location:", error);
+    return {};
+  }
+}
+
+async function calculateBudgetFromCensus(locationId, budgetMonth) {
+  try {
+    // Get census data for the location and month
+    const censusQuery = `
+      SELECT 
+        census_amount
+      FROM shopify.location_census 
+      WHERE location_id = @locationId 
+        AND census_month = @budgetMonth
+    `;
+    
+    const censusData = await mssql.query(censusQuery, { 
+      locationId: locationId.toString(), 
+      budgetMonth 
+    });
+    
+    if (!censusData || censusData.length === 0) {
+      console.log(`No census data found for location ${locationId} and month ${budgetMonth}`);
+      return {};
+    }
+    
+    const censusAmount = censusData[0].census_amount;
+    
+    // Calculate days in the budget month
+    const [month, year] = budgetMonth.split('-');
+    const daysInMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
+    
+    // Get all budget categories with their PPD rates (allocated_amount as PPD)
+    const categoriesQuery = `
+      SELECT DISTINCT
+        bcm.category_name,
+        bc.allocated_amount as ppd_rate
+      FROM shopify.budget_location_assignments bla
+      INNER JOIN shopify.budget b ON bla.budget_id = b.id
+      INNER JOIN shopify.budget_categories bc ON b.id = bc.budget_id
+      INNER JOIN shopify.budget_categories_master bcm ON bc.category_id = bcm.id
+      WHERE bla.location_id = @locationId 
+        AND bla.status = 'active'
+        AND b.status = 'active'
+    `;
+    
+    const categoriesData = await mssql.query(categoriesQuery, { locationId });
+    
+    // Calculate budget for each category using the formula:
+    // BUDGET OF CATEGORY = CENSUS OF LOCATION × DAYS OF THE CURRENT MONTH × PPD
+    const budgetMap = {};
+    
+    categoriesData.forEach(category => {
+      const decodedCategoryName = decodeHtmlEntities(category.category_name);
+      const ppdRate = parseFloat(category.ppd_rate) || 0;
+      
+      // Calculate budget: census × days × PPD
+      const calculatedBudget = censusAmount * daysInMonth * ppdRate;
+      
+      budgetMap[decodedCategoryName] = calculatedBudget;
+      // Also store the original in case it's needed
+      budgetMap[category.category_name] = calculatedBudget;
+    });
+    
+    console.log(`Budget calculation for location ${locationId}, month ${budgetMonth}:`);
+    console.log(`Census: ${censusAmount}, Days: ${daysInMonth}`);
+    console.log('Calculated budgets:', budgetMap);
+    
+    return budgetMap;
+    
+  } catch (error) {
+    console.error("Error calculating budget from census:", error);
     return {};
   }
 }
@@ -298,7 +375,10 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
     let budgetMap = {};
     if (filters.locationId || filters.companyLocationId) {
       const locationForBudget = filters.locationId || filters.companyLocationId;
-      budgetMap = await getBudgetDataForLocation(locationForBudget);
+      // Pass budgetMonth if available (constructed from month/year filters)
+      const budgetMonth = filters.month && filters.year ? 
+        `${filters.month.toString().padStart(2, '0')}-${filters.year}` : null;
+      budgetMap = await getBudgetDataForLocation(locationForBudget, budgetMonth);
     }
 
     console.log("Budget Map:", budgetMap);
@@ -553,7 +633,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
     let budgetMap = {};
     if (filters.locationId || filters.companyLocationId) {
       const locationForBudget = filters.locationId || filters.companyLocationId;
-      budgetMap = await getBudgetDataForLocation(locationForBudget);
+      budgetMap = await getBudgetDataForLocation(locationForBudget, filters.budgetMonth);
     }
 
     console.log("Budget Map:", budgetMap);

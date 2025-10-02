@@ -25,6 +25,7 @@ export default function App() {
           <Link to="/app/budget-create" rel="create Budget">Create Budget</Link>
           <Link to="/app/budget-categories" rel="manage Categories">Categories Management</Link>
           <Link to="/app/budget-location-assignments" rel="budget assignments">Budget Location Assignments</Link>
+          <Link to="/app/location-census" rel="location census">Location Census & Budget Management</Link>
 
         </NavMenu>
         <Outlet />
