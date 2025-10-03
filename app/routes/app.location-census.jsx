@@ -238,10 +238,13 @@ export default function LocationCensusManagement() {
       ? `${record.location_id}-${locationInfo.location_name}` 
       : record.location_id;
       
+      console.log('Record:', record);
+
     return [
       `$${parseFloat(record.census_amount).toFixed(2)}`,
       locationDisplay,
-      new Date(record.created_at || Date.now()).toLocaleDateString(),
+      //show MM-YY only 
+      new Date(record.year_number, record.month_number - 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' } ),
       <InlineStack key={record.id} gap="200">
         <Button size="slim" onClick={() => handleEdit(record)}>
           Edit
@@ -312,7 +315,7 @@ export default function LocationCensusManagement() {
                     headings={[
                       "Census Total", 
                       "Location ID & Name",
-                      "Assigned Date",
+                      "Month",
                       "Actions"
                     ]}
                     rows={tableRows}
