@@ -60,6 +60,7 @@ function decodeHtmlEntities(str) {
 async function getBudgetDataForLocation(locationId, budgetMonth = null) {
   try {
     // If budgetMonth is provided, calculate budget using census data
+    console.log("Fetching budget data for location:", locationId, "and budgetMonth:", budgetMonth);
     if (budgetMonth && locationId) {
       return await calculateBudgetFromCensus(locationId, budgetMonth);
     }
@@ -152,7 +153,7 @@ async function calculateBudgetFromCensus(locationId, budgetMonth) {
       const ppdRate = parseFloat(category.ppd_rate) || 0;
       
       // Calculate budget: census × days × PPD
-      const calculatedBudget = censusAmount * daysInMonth * ppdRate;
+      const calculatedBudget = (censusAmount * daysInMonth * ppdRate).toFixed(2);
       
       budgetMap[decodedCategoryName] = calculatedBudget;
       // Also store the original in case it's needed
@@ -344,6 +345,7 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
  * @param {string} filters.year - Year (YYYY)
  * @returns {Promise<Object>} Object containing categories array and summary totals
  */
+/*
 export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {}) {
   try {
     const conditions = [];
@@ -380,6 +382,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
       // Pass budgetMonth if available (constructed from month/year filters)
       const budgetMonth = filters.month && filters.year ? 
         `${filters.month.toString().padStart(2, '0')}-${filters.year}` : null;
+        console.log("Fetching budget for month:=============", budgetMonth);
       budgetMap = await getBudgetDataForLocation(locationForBudget, budgetMonth);
     }
 
@@ -580,7 +583,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {})
     console.error("Error fetching monthly order products by category with refunds:", error);
     throw new Error(`Failed to fetch monthly order products by category with refunds: ${error.message}`);
   }
-}
+} */
 
 /**
  * Get monthly order products summary grouped by category with refunds accounted for (Budget Month Based)
@@ -635,7 +638,12 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
     let budgetMap = {};
     if (filters.locationId || filters.companyLocationId) {
       const locationForBudget = filters.locationId || filters.companyLocationId;
-      budgetMap = await getBudgetDataForLocation(locationForBudget, filters.budgetMonth);
+      // Pass budgetMonth if available (constructed from month/year filters)
+      const budgetMonth = filters.month && filters.year ? 
+        `${filters.month.toString().padStart(2, '0')}-${filters.year}` : null;
+       
+      console.log("Fetching budget for month (Budget Month Based):", budgetMonth);
+      budgetMap = await getBudgetDataForLocation(locationForBudget, budgetMonth);
     }
 
      console.log("Budget Map:", budgetMap);
