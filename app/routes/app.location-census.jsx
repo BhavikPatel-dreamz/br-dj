@@ -139,7 +139,7 @@ export default function LocationCensusManagement() {
     const currentDate = new Date();
     const currentYear = currentDate.getFullYear();
     
-    for (let year = currentYear - 2; year <= currentYear + 2; year++) {
+    for (let year = currentYear - 0; year <= currentYear + 0; year++) {
       for (let month = 1; month <= 12; month++) {
         const monthStr = month.toString().padStart(2, '0');
         const date = new Date(year, month - 1, 1);
