@@ -164,6 +164,7 @@ export const loader = async ({ request }) => {
       error: null,
       data: {
         categories: result.categories || [],
+        allProducts: result.allProducts || [],
         summary: {
           totalOrders: result.totalOrders || 0,
           ordersWithRefunds: result.ordersWithRefunds || 0,

@@ -21,13 +21,12 @@ import {
 } from "@shopify/polaris";
 import { SearchIcon } from '@shopify/polaris-icons';
 import { TitleBar } from "@shopify/app-bridge-react";
+import  { authenticate } from "../shopify.server.js";
+import { getAllLocationCensus,getAvailableLocationsForCensus,deleteLocationCensus } from "../actions/fhr-location-census.server.js";
+
+
 
 export const loader = async ({ request }) => {
-  const { authenticate } = await import("../shopify.server.js");
-  const {
-    getAvailableLocationsForCensus,
-    getAllLocationCensus
-  } = await import("../actions/fhr-location-census.server.js");
 
   await authenticate.admin(request);
 
@@ -58,11 +57,7 @@ export const loader = async ({ request }) => {
 };
 
 export const action = async ({ request }) => {
-  const { authenticate } = await import("../shopify.server.js");
-  const {
-    createOrUpdateLocationCensus,
-    deleteLocationCensus
-  } = await import("../actions/fhr-location-census.server.js");
+
   
   await authenticate.admin(request);
 

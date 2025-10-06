@@ -162,7 +162,7 @@ async function calculateBudgetFromCensus(locationId, budgetMonth) {
     
     // console.log(`Budget calculation for location ${locationId}, month ${budgetMonth}:`);
     // console.log(`Census: ${censusAmount}, Days: ${daysInMonth}`);
-     console.log('Calculated budgets:', budgetMap);
+     //console.log('Calculated budgets:', budgetMap);
     
     return budgetMap;
     
@@ -642,11 +642,11 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       const budgetMonth = filters.month && filters.year ? 
         `${filters.month.toString().padStart(2, '0')}-${filters.year}` : null;
        
-      console.log("Fetching budget for month (Budget Month Based):", budgetMonth);
+      //console.log("Fetching budget for month (Budget Month Based):", budgetMonth);
       budgetMap = await getBudgetDataForLocation(locationForBudget, budgetMonth);
     }
 
-     console.log("Budget Map:", budgetMap);
+     //console.log("Budget Map:", budgetMap);
     // console.log("Budget Month Filter:", filters.budgetMonth);
     // console.log("Fallback Budget Month:", params.fallbackBudgetMonth);
     // console.log("Where Clause:", whereClause);
@@ -770,7 +770,10 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       LEFT JOIN RefundStats rs ON os.order_id = rs.order_id AND os.category_name = rs.category_name
     `;
 
-    // Query to fetch ALL products grouped by category (not just ordered products)
+    // Simple test query to check if products exist
+    const testProductQuery = `SELECT TOP 5 id, title, status, shopify_category FROM brdjdb.shopify.product`;
+    
+    // Simple query to fetch ALL products grouped by category
     const allProductsByCategoryQuery = `
       SELECT 
         COALESCE(p.shopify_category, 'Uncategorized') as category_name,
@@ -778,35 +781,30 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
         p.title as product_name,
         p.vendor,
         p.product_type,
-        p.status,
-        p.handle,
-        p.tags,
-        COUNT(pv.id) as variant_count,
-        STRING_AGG(pv.sku, ', ') as all_skus,
-        AVG(CAST(pv.price AS DECIMAL(10,2))) as average_price,
-        MIN(CAST(pv.price AS DECIMAL(10,2))) as min_price,
-        MAX(CAST(pv.price AS DECIMAL(10,2))) as max_price
+        p.status
       FROM brdjdb.shopify.product p
-      LEFT JOIN brdjdb.shopify.product_variant pv ON p.id = pv.product_id
-      WHERE p.status = 'active'
-      GROUP BY 
-        p.id,
-        COALESCE(p.shopify_category, 'Uncategorized'),
-        p.title,
-        p.vendor,
-        p.product_type,
-        p.status,
-        p.handle,
-        p.tags
+      WHERE p.status = 'ACTIVE'
       ORDER BY category_name, p.title
     `;
 
-    // Execute all three queries
-    const [productResults, summaryResult, allProductsResults] = await Promise.all([
+    // Execute all queries including test query
+    const [productResults, summaryResult, testProductsResults, allProductsResults] = await Promise.all([
       mssql.query(query, params),
       mssql.query(categorySummaryQuery, params),
+      mssql.query(testProductQuery, {}),
       mssql.query(allProductsByCategoryQuery, {})
     ]);
+
+    console.log("Debug - Test Products Query Results:", {
+      count: testProductsResults.length,
+      sample: testProductsResults.slice(0, 2)
+    });
+
+    console.log("Debug - All Products Query Results:", {
+      count: allProductsResults.length,
+      sample: allProductsResults.slice(0, 3),
+      firstProduct: allProductsResults[0]
+    });
 
     // Group products by category
     const categorizedData = {};
@@ -866,6 +864,9 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       }
     });
 
+
+    console.log("All Products Results Count:", allProductsResults.length);
+
     // Group ALL products by category (not just ordered products)
     const allProductsByCategory = {};
     allProductsResults.forEach(product => {
@@ -885,14 +886,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
         product_name: product.product_name,
         vendor: product.vendor,
         product_type: product.product_type,
-        status: product.status,
-        handle: product.handle,
-        tags: product.tags,
-        variant_count: product.variant_count,
-        all_skus: product.all_skus,
-        average_price: product.average_price,
-        min_price: product.min_price,
-        max_price: product.max_price
+        status: product.status
       });
       
       allProductsByCategory[categoryName].total_products += 1;
@@ -921,9 +915,11 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       net_value: 0
     };
 
+
+
     return {
       categories,
-      allProductsByCategory: allProductsByCategoryArray, // New key for ALL products grouped by category
+      allProducts: allProductsByCategoryArray, // Return as array of categories with nested products
       totalOrders: summary.total_orders || 0,
       ordersWithRefunds: summary.orders_with_refunds || 0,
       totalCategories: summary.total_categories || 0,
