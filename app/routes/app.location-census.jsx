@@ -22,7 +22,7 @@ import {
 import { SearchIcon } from '@shopify/polaris-icons';
 import { TitleBar } from "@shopify/app-bridge-react";
 import  { authenticate } from "../shopify.server.js";
-import { getAllLocationCensus,getAvailableLocationsForCensus,deleteLocationCensus } from "../actions/fhr-location-census.server.js";
+import { getAllLocationCensus,getAvailableLocationsForCensus,deleteLocationCensus, createOrUpdateLocationCensus , } from "../actions/fhr-location-census.server.js";
 
 
 
@@ -435,7 +435,7 @@ export default function LocationCensusManagement() {
       : record.location_id;
 
     return [
-      `$${parseFloat(record.census_amount).toFixed(2)}`,
+      `${parseInt(record.census_amount)}`,
       locationDisplay,
       new Date(record.year_number, record.month_number - 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
       <InlineStack key={record.id} gap="200">

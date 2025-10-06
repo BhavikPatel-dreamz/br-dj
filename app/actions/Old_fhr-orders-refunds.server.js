@@ -110,7 +110,7 @@ async function calculateBudgetFromCensus(locationId, budgetMonth) {
       WHERE location_id = @locationId 
         AND census_month = @budgetMonth
     `;
-    let  censusAmount = 1;
+    
     const censusData = await mssql.query(censusQuery, { 
       locationId, 
       budgetMonth 
@@ -118,15 +118,10 @@ async function calculateBudgetFromCensus(locationId, budgetMonth) {
     
     if (!censusData || censusData.length === 0) {
       console.log(`No census data found for location ${locationId} and month ${budgetMonth}`);
-      //return {};
-      const censusAmount = 1;
-    }
-    else
-    {
-      censusAmount = censusData[0].census_amount;
+      return {};
     }
     
-   
+    const censusAmount = censusData[0].census_amount;
     
     // Calculate days in the budget month
     const [month, year] = budgetMonth.split('-');
@@ -341,6 +336,256 @@ export async function getMonthlyOrderProductsWithRefunds(filters = {}) {
 }
 
 /**
+ * Get monthly order products summary grouped by category with refunds accounted for
+ * @param {Object} filters - Filter criteria
+ * @param {string} filters.customerId - Customer ID filter
+ * @param {string} filters.locationId - Location ID filter
+ * @param {string} filters.companyLocationId - Company Location ID filter
+ * @param {string} filters.month - Month (01-12)
+ * @param {string} filters.year - Year (YYYY)
+ * @returns {Promise<Object>} Object containing categories array and summary totals
+ */
+/*
+export async function getMonthlyOrderProductsByCategoryWithRefunds(filters = {}) {
+  try {
+    const conditions = [];
+    const params = {};
+    
+    // Build dynamic WHERE conditions for orders
+    if (filters.customerId) {
+      conditions.push('o.customer_id = @customerId');
+      params.customerId = filters.customerId;
+    }
+    if (filters.locationId) {
+      conditions.push('o.location_id = @locationId');
+      params.locationId = filters.locationId;
+    }
+    if (filters.companyLocationId) {
+      conditions.push('o.company_location_id = @companyLocationId');
+      params.companyLocationId = filters.companyLocationId;
+    }
+
+    // Add date filters for the specified month/year
+    if (filters.month && filters.year) {
+      conditions.push('MONTH(o.created_at) = @month');
+      conditions.push('YEAR(o.created_at) = @year');
+      params.month = parseInt(filters.month);
+      params.year = parseInt(filters.year);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Get budget data for the location
+    let budgetMap = {};
+    if (filters.locationId || filters.companyLocationId) {
+      const locationForBudget = filters.locationId || filters.companyLocationId;
+      // Pass budgetMonth if available (constructed from month/year filters)
+      const budgetMonth = filters.month && filters.year ? 
+        `${filters.month.toString().padStart(2, '0')}-${filters.year}` : null;
+        console.log("Fetching budget for month:=============", budgetMonth);
+      budgetMap = await getBudgetDataForLocation(locationForBudget, budgetMonth);
+    }
+
+    console.log("Budget Map:", budgetMap);
+
+    // Enhanced query that calculates net quantities and values by category
+    const query = `
+      WITH OrderedProducts AS (
+        SELECT 
+          COALESCE(p.shopify_category, 'Uncategorized') as category_name,
+          ol.id as order_line_id,
+          ol.product_id,
+          ol.variant_id,
+          ol.name as product_name,
+          ol.sku,
+          ol.vendor,
+          ol.quantity as ordered_quantity,
+          CAST(ol.price AS DECIMAL(10,2)) as unit_price,
+          CAST(ol.price AS DECIMAL(10,2)) * ol.quantity as ordered_value,
+          o.id as order_id
+        FROM brdjdb.shopify.[order] AS o
+        INNER JOIN brdjdb.shopify.order_line AS ol ON o.id = ol.order_id
+        LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
+        ${whereClause}
+      ),
+      RefundedProducts AS (
+        -- Get all refunded products for orders from the same period (refunds can be from any date)
+        SELECT 
+          olr.order_line_id,
+          SUM(olr.quantity) as total_refunded_quantity,
+          SUM(olr.subtotal) as total_refunded_value
+        FROM brdjdb.shopify.order_line_refund AS olr
+        INNER JOIN brdjdb.shopify.refund AS r ON olr.refund_id = r.id
+        INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
+        INNER JOIN OrderedProducts op ON olr.order_line_id = op.order_line_id
+        GROUP BY olr.order_line_id
+      ),
+      ProductSummary AS (
+        SELECT 
+          op.category_name,
+          op.product_id,
+          op.variant_id,
+          op.product_name,
+          op.sku,
+          op.vendor,
+          SUM(op.ordered_quantity) as gross_quantity,
+          SUM(COALESCE(rp.total_refunded_quantity, 0)) as refunded_quantity,
+          SUM(op.ordered_quantity - COALESCE(rp.total_refunded_quantity, 0)) as net_quantity,
+          SUM(op.ordered_value) as gross_value,
+          SUM(COALESCE(rp.total_refunded_value, 0)) as refunded_value,
+          SUM(op.ordered_value - COALESCE(rp.total_refunded_value, 0)) as net_value,
+          AVG(op.unit_price) as average_price,
+          COUNT(DISTINCT op.order_id) as order_count
+        FROM OrderedProducts op
+        LEFT JOIN RefundedProducts rp ON op.order_line_id = rp.order_line_id
+        GROUP BY 
+          op.category_name,
+          op.product_id,
+          op.variant_id,
+          op.product_name,
+          op.sku,
+          op.vendor
+      )
+      SELECT 
+        category_name,
+        product_id,
+        variant_id,
+        product_name,
+        sku,
+        vendor,
+        net_quantity as total_quantity,
+        net_value as total_price,
+        average_price,
+        order_count,
+        gross_quantity,
+        refunded_quantity,
+        gross_value,
+        refunded_value
+      FROM ProductSummary
+      ORDER BY category_name, net_quantity DESC, net_value DESC
+    `;
+
+
+    // Summary query for categories with proper refund aggregation - includes ALL products
+    const categorySummaryQuery = `
+      WITH OrderStats AS (
+        SELECT 
+          o.id as order_id,
+          SUM(CAST(ol.price AS DECIMAL(10,2)) * ol.quantity) as order_value,
+          COALESCE(p.shopify_category, 'Uncategorized') as category_name
+        FROM brdjdb.shopify.[order] AS o
+        INNER JOIN brdjdb.shopify.order_line AS ol ON o.id = ol.order_id
+        LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
+        ${whereClause}
+        GROUP BY o.id, COALESCE(p.shopify_category, 'Uncategorized')
+      ),
+      RefundStats AS (
+        SELECT 
+          r.order_id,
+          COALESCE(p.shopify_category, 'Uncategorized') as category_name,
+          SUM(olr.subtotal) as refunded_value
+        FROM brdjdb.shopify.refund AS r
+        INNER JOIN brdjdb.shopify.order_line_refund AS olr ON r.id = olr.refund_id
+        INNER JOIN brdjdb.shopify.order_line AS ol ON olr.order_line_id = ol.id
+        INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
+        LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
+        ${whereClause}
+        GROUP BY r.order_id, COALESCE(p.shopify_category, 'Uncategorized')
+      )
+      SELECT 
+        COUNT(DISTINCT os.order_id) as total_orders,
+        COUNT(DISTINCT CASE WHEN rs.order_id IS NOT NULL THEN os.order_id END) as orders_with_refunds,
+        COUNT(DISTINCT os.category_name) as total_categories,
+        SUM(os.order_value) as gross_value,
+        SUM(COALESCE(rs.refunded_value, 0)) as total_refunded_value,
+        SUM(os.order_value - COALESCE(rs.refunded_value, 0)) as net_value
+      FROM OrderStats os
+      LEFT JOIN RefundStats rs ON os.order_id = rs.order_id AND os.category_name = rs.category_name
+    `;
+
+
+
+    // Execute both queries
+    const [productResults, summaryResult] = await Promise.all([
+      mssql.query(query, params),
+      mssql.query(categorySummaryQuery, params)
+    ]);
+
+
+
+
+    // Group products by category
+    const categorizedData = {};
+    productResults.forEach(product => {
+      const categoryName = decodeHtmlEntities(product.category_name || 'Uncategorized');
+      
+      if (!categorizedData[categoryName]) {
+        categorizedData[categoryName] = {
+          category_name: categoryName,
+          products: [],
+          total_quantity: 0,
+          total_value: 0,
+          gross_quantity: 0,
+          gross_value: 0,
+          refunded_quantity: 0,
+          refunded_value: 0,
+          budget: budgetMap[categoryName] || 0 // Set budget from database or 0
+        };
+      }
+      
+      categorizedData[categoryName].products.push({
+        product_name: product.product_name,
+        sku: product.sku,
+        vendor: product.vendor,
+        total_quantity: product.total_quantity,
+        total_price: product.total_price,
+        average_price: product.average_price,
+        order_count: product.order_count,
+        gross_quantity: product.gross_quantity,
+        refunded_quantity: product.refunded_quantity,
+        gross_value: product.gross_value,
+        refunded_value: product.refunded_value
+      });
+      
+      categorizedData[categoryName].total_quantity += product.total_quantity || 0;
+      categorizedData[categoryName].total_value += product.total_price || 0;
+      categorizedData[categoryName].gross_quantity += product.gross_quantity || 0;
+      categorizedData[categoryName].gross_value += product.gross_value || 0;
+      categorizedData[categoryName].refunded_quantity += product.refunded_quantity || 0;
+      categorizedData[categoryName].refunded_value += product.refunded_value || 0;
+      
+      
+      
+    });
+
+    const categories = Object.values(categorizedData);
+    const summary = summaryResult[0] || { 
+      total_orders: 0, 
+      orders_with_refunds: 0,
+      total_categories: 0, 
+      gross_value: 0,
+      total_refunded_value: 0,
+      net_value: 0
+    };
+
+    return {
+      categories,
+      totalOrders: summary.total_orders || 0,
+      ordersWithRefunds: summary.orders_with_refunds || 0,
+      totalCategories: summary.total_categories || 0,
+      grossValue: summary.gross_value || 0,
+      refundedValue: summary.total_refunded_value || 0,
+      totalValue: summary.net_value || 0, // Net value after refunds
+      refundRate: summary.total_orders > 0 ? (summary.orders_with_refunds / summary.total_orders * 100) : 0
+    };
+
+  } catch (error) {
+    console.error("Error fetching monthly order products by category with refunds:", error);
+    throw new Error(`Failed to fetch monthly order products by category with refunds: ${error.message}`);
+  }
+} */
+
+/**
  * Get monthly order products summary grouped by category with refunds accounted for (Budget Month Based)
  * This function uses order_budget_month field instead of created_at for period determination
  * @param {Object} filters - Filter criteria
@@ -369,16 +614,10 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       params.companyLocationId = filters.companyLocationId;
     }
 
-
- const budgetMonth = filters.month && filters.year ? 
-        `${filters.month.toString().padStart(2, '0')}-${filters.year}` : null;
-       
-    
-
     // Add budget month filter with fallback to created_at - this is the key difference from the original function
-    if (budgetMonth) {
+    if (filters.budgetMonth) {
       // Parse the budget month to extract month and year for fallback
-      const [month, year] = budgetMonth.split('-');
+      const [month, year] = filters.budgetMonth.split('-');
       const paddedMonth = month.padStart(2, '0');
       const fallbackBudgetMonth = `${paddedMonth}-${year}`;
       
@@ -389,7 +628,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
           AND FORMAT(o.created_at, 'MM-yyyy') = @fallbackBudgetMonth
         )
       )`);
-      params.budgetMonth = budgetMonth;
+      params.budgetMonth = filters.budgetMonth;
       params.fallbackBudgetMonth = fallbackBudgetMonth;
     }
 
@@ -399,17 +638,18 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
     let budgetMap = {};
     if (filters.locationId || filters.companyLocationId) {
       const locationForBudget = filters.locationId || filters.companyLocationId;
-      // Use filters.budgetMonth directly instead of constructing from month/year
-     
-      console.log("Fetching budget for location:", locationForBudget, "and budgetMonth:", budgetMonth);
+      // Pass budgetMonth if available (constructed from month/year filters)
+      const budgetMonth = filters.month && filters.year ? 
+        `${filters.month.toString().padStart(2, '0')}-${filters.year}` : null;
+       
+      //console.log("Fetching budget for month (Budget Month Based):", budgetMonth);
       budgetMap = await getBudgetDataForLocation(locationForBudget, budgetMonth);
-      //console.log("Budget Map Result:", Object.keys(budgetMap).length > 0 ? Object.keys(budgetMap) : "Empty budget map");
     }
 
      //console.log("Budget Map:", budgetMap);
     // console.log("Budget Month Filter:", filters.budgetMonth);
     // console.log("Fallback Budget Month:", params.fallbackBudgetMonth);
-     //console.log("Where Clause:", whereClause);
+    // console.log("Where Clause:", whereClause);
     // console.log("Query Params:", conditions);
 
 
@@ -531,6 +771,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
     `;
 
     // Simple test query to check if products exist
+    const testProductQuery = `SELECT TOP 5 id, title, status, shopify_category FROM brdjdb.shopify.product`;
     
     // Simple query to fetch ALL products grouped by category
     const allProductsByCategoryQuery = `
@@ -547,68 +788,66 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
     `;
 
     // Execute all queries including test query
-    const [productResults, summaryResult, allProductsResults] = await Promise.all([
+    const [productResults, summaryResult, testProductsResults, allProductsResults] = await Promise.all([
       mssql.query(query, params),
       mssql.query(categorySummaryQuery, params),
+      mssql.query(testProductQuery, {}),
       mssql.query(allProductsByCategoryQuery, {})
     ]);
 
-   
+    console.log("Debug - Test Products Query Results:", {
+      count: testProductsResults.length,
+      sample: testProductsResults.slice(0, 2)
+    });
 
-    console.log("Product Results Count:", productResults.length);
-    console.log("Summary Result:", summaryResult);
-    console.log("All Products Results Count:", allProductsResults.length);
-    console.log("Budget Map:", budgetMap);
-  
+    console.log("Debug - All Products Query Results:", {
+      count: allProductsResults.length,
+      sample: allProductsResults.slice(0, 3),
+      firstProduct: allProductsResults[0]
+    });
 
-    // Group products by category - ONLY include categories that are assigned in budget_category table
+    // Group products by category
     const categorizedData = {};
-
-    
     productResults.forEach(product => {
       const categoryName = decodeHtmlEntities(product.category_name || 'Uncategorized');
       
-      // ONLY process categories that have budget assignments
-      if (budgetMap[categoryName] !== undefined) {
-        if (!categorizedData[categoryName]) {
-          categorizedData[categoryName] = {
-            category_name: categoryName,
-            products: [],
-            total_quantity: 0,
-            total_value: 0,
-            gross_quantity: 0,
-            gross_value: 0,
-            refunded_quantity: 0,
-            refunded_value: 0,
-            budget: budgetMap[categoryName],
-            hasBudget: true
-          };
-        }
-        
-        categorizedData[categoryName].products.push({
-          product_name: product.product_name,
-          sku: product.sku,
-          vendor: product.vendor,
-          total_quantity: product.total_quantity,
-          total_price: product.total_price,
-          average_price: product.average_price,
-          order_count: product.order_count,
-          gross_quantity: product.gross_quantity,
-          refunded_quantity: product.refunded_quantity,
-          gross_value: product.gross_value,
-          refunded_value: product.refunded_value
-        });
-        
-        categorizedData[categoryName].total_quantity += parseFloat(product.total_quantity) || 0;
-        categorizedData[categoryName].total_value += parseFloat(product.total_price) || 0;
-        categorizedData[categoryName].gross_quantity += parseFloat(product.gross_quantity) || 0;
-        categorizedData[categoryName].gross_value += parseFloat(product.gross_value) || 0;
-        categorizedData[categoryName].refunded_quantity += parseFloat(product.refunded_quantity) || 0;
-        categorizedData[categoryName].refunded_value += parseFloat(product.refunded_value) || 0;
-      } 
+      if (!categorizedData[categoryName]) {
+        categorizedData[categoryName] = {
+          category_name: categoryName,
+          products: [],
+          total_quantity: 0,
+          total_value: 0,
+          gross_quantity: 0,
+          gross_value: 0,
+          refunded_quantity: 0,
+          refunded_value: 0,
+          budget: budgetMap[categoryName] || 0 // Set budget from database or 0
+        };
+      }
+      
+      categorizedData[categoryName].products.push({
+        product_name: product.product_name,
+        sku: product.sku,
+        vendor: product.vendor,
+        total_quantity: product.total_quantity,
+        total_price: product.total_price,
+        average_price: product.average_price,
+        order_count: product.order_count,
+        gross_quantity: product.gross_quantity,
+        refunded_quantity: product.refunded_quantity,
+        gross_value: product.gross_value,
+        refunded_value: product.refunded_value
+      });
+      
+      categorizedData[categoryName].total_quantity += parseFloat(product.total_quantity) || 0;
+      categorizedData[categoryName].total_value += parseFloat(product.total_price) || 0;
+      categorizedData[categoryName].gross_quantity += parseFloat(product.gross_quantity) || 0;
+      categorizedData[categoryName].gross_value += parseFloat(product.gross_value) || 0;
+      categorizedData[categoryName].refunded_quantity += parseFloat(product.refunded_quantity) || 0;
+      categorizedData[categoryName].refunded_value += parseFloat(product.refunded_value) || 0;
     });
 
-    // Add budget categories that have no orders in this period - they should still appear in results
+    // Add budget categories that have no orders in this period
     Object.keys(budgetMap).forEach(budgetCategoryName => {
       if (!categorizedData[budgetCategoryName]) {
         categorizedData[budgetCategoryName] = {
@@ -620,53 +859,47 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
           gross_value: 0,
           refunded_quantity: 0,
           refunded_value: 0,
-          budget: budgetMap[budgetCategoryName],
-          hasBudget: true
+          budget: budgetMap[budgetCategoryName]
         };
       }
     });
 
 
-    //console.log("All Products Results Count:", allProductsResults.length);
+    console.log("All Products Results Count:", allProductsResults.length);
 
-    // Group ALL products by category (not just ordered products) - ONLY include categories assigned in budget
+    // Group ALL products by category (not just ordered products)
     const allProductsByCategory = {};
     allProductsResults.forEach(product => {
       const categoryName = decodeHtmlEntities(product.category_name || 'Uncategorized');
       
-      // ONLY process categories that have budget assignments
-      if (budgetMap[categoryName] !== undefined) {
-        if (!allProductsByCategory[categoryName]) {
-          allProductsByCategory[categoryName] = {
-            category_name: categoryName,
-            products: [],
-            total_products: 0,
-            budget: budgetMap[categoryName],
-            hasBudget: true
-          };
-        }
-        
-        allProductsByCategory[categoryName].products.push({
-          product_id: product.product_id,
-          product_name: product.product_name,
-          vendor: product.vendor,
-          product_type: product.product_type,
-          status: product.status
-        });
-        
-        allProductsByCategory[categoryName].total_products += 1;
+      if (!allProductsByCategory[categoryName]) {
+        allProductsByCategory[categoryName] = {
+          category_name: categoryName,
+          products: [],
+          total_products: 0,
+          budget: budgetMap[categoryName] || 0
+        };
       }
+      
+      allProductsByCategory[categoryName].products.push({
+        product_id: product.product_id,
+        product_name: product.product_name,
+        vendor: product.vendor,
+        product_type: product.product_type,
+        status: product.status
+      });
+      
+      allProductsByCategory[categoryName].total_products += 1;
     });
 
-    // Add budget categories that have no products - they should still appear in allProducts
+    // Add budget categories that have no products
     Object.keys(budgetMap).forEach(budgetCategoryName => {
       if (!allProductsByCategory[budgetCategoryName]) {
         allProductsByCategory[budgetCategoryName] = {
           category_name: budgetCategoryName,
           products: [],
           total_products: 0,
-          budget: budgetMap[budgetCategoryName],
-          hasBudget: true
+          budget: budgetMap[budgetCategoryName]
         };
       }
     });
