@@ -1,5 +1,5 @@
-import { useLoaderData, useSubmit, useNavigation, useActionData } from "@remix-run/react";
-import { useState, useCallback, useEffect } from "react";
+import { useLoaderData, useSubmit, useNavigation, useActionData, useNavigate, useSearchParams } from "@remix-run/react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { json } from "@remix-run/node";
 import {
   Page,
@@ -11,12 +11,15 @@ import {
   Button,
   InlineStack,
   FormLayout,
-  Select,
+  Autocomplete,
+  Icon,
   DataTable,
   Modal,
   Toast,
   Frame,
+  Spinner,
 } from "@shopify/polaris";
+import { SearchIcon } from '@shopify/polaris-icons';
 import { TitleBar } from "@shopify/app-bridge-react";
 
 export const loader = async ({ request }) => {
@@ -25,32 +28,24 @@ export const loader = async ({ request }) => {
     getAvailableLocationsForCensus,
     getAllLocationCensus
   } = await import("../actions/fhr-location-census.server.js");
-  
+
   await authenticate.admin(request);
-  
-  const url = new URL(request.url);
-  const selectedMonth = url.searchParams.get("month") || "";
-  const selectedLocation = url.searchParams.get("location") || "";
-  
+
   try {
-    const locations = await getAvailableLocationsForCensus();
-    
-    // Apply filters if provided
+    const url = new URL(request.url);
+    const locationId = url.searchParams.get("locationId");
+    const censusMonth = url.searchParams.get("censusMonth");
+
     const filters = {};
-    if (selectedLocation) filters.locationId = selectedLocation;
-    if (selectedMonth) {
-      const [month, year] = selectedMonth.split('-');
-      filters.month = month;
-      filters.year = year;
-    }
-    
+    if (locationId) filters.locationId = locationId;
+    if (censusMonth) filters.censusMonth = censusMonth;
+
+    const locations = await getAvailableLocationsForCensus();
     const censusRecords = await getAllLocationCensus(filters);
 
     return json({
       locations,
-      censusRecords,
-      selectedMonth,
-      selectedLocation
+      censusRecords
     });
   } catch (error) {
     console.error("Loader error:", error);
@@ -119,11 +114,13 @@ export const action = async ({ request }) => {
   }
 };
 
-export default function LocationCensusManagement() {  
-  const { locations, censusRecords, selectedMonth, selectedLocation, error } = useLoaderData();
+export default function LocationCensusManagement() {
+  const { locations, censusRecords, error } = useLoaderData();
   const submit = useSubmit();
   const navigation = useNavigation();
   const actionData = useActionData();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
 
   const [showModal, setShowModal] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
@@ -133,31 +130,241 @@ export default function LocationCensusManagement() {
     censusAmount: ""
   });
 
-  // Generate month options (2 years past to 2 years future)
-  const generateMonthOptions = () => {
+  // Filter autocomplete states
+  const [locationInputValue, setLocationInputValue] = useState('');
+  const [selectedLocationOptions, setSelectedLocationOptions] = useState([]);
+  const [locationOptions, setLocationOptions] = useState([]);
+
+  const [monthInputValue, setMonthInputValue] = useState('');
+  const [selectedMonthOptions, setSelectedMonthOptions] = useState([]);
+  const [monthOptions, setMonthOptions] = useState([]);
+
+  // Modal autocomplete states
+  const [modalLocationInputValue, setModalLocationInputValue] = useState('');
+  const [modalLocationOptions, setModalLocationOptions] = useState([]);
+
+  const [modalMonthInputValue, setModalMonthInputValue] = useState('');
+  const [modalMonthOptions, setModalMonthOptions] = useState([]);
+
+  // Generate month options
+  const allMonthOptions = useMemo(() => {
     const options = [];
     const currentDate = new Date();
-    const currentYear = currentDate.getFullYear();
-    
-    for (let year = currentYear - 0; year <= currentYear + 0; year++) {
-      for (let month = 1; month <= 12; month++) {
-        const monthStr = month.toString().padStart(2, '0');
-        const date = new Date(year, month - 1, 1);
-        const monthName = date.toLocaleDateString('en-US', { month: 'long' });
-        
-        options.push({
-          label: `${monthName} ${year}`,
-          value: `${monthStr}-${year}`
-        });
-      }
+
+    for (let i = -3; i <= 3; i++) {
+      const date = new Date(currentDate.getFullYear(), currentDate.getMonth() + i, 1);
+      const monthStr = (date.getMonth() + 1).toString().padStart(2, '0');
+      const year = date.getFullYear();
+      const monthName = date.toLocaleDateString('en-US', { month: 'long' });
+
+      options.push({
+        label: `${monthName} ${year}`,
+        value: `${monthStr}-${year}`
+      });
     }
-    
+
     return options;
-  };
+  }, []);
 
-  const monthOptions = generateMonthOptions();
+  // Location options with "All Locations"
+  const locationAutocompleteOptions = useMemo(() => [
+    { value: '', label: 'All Locations' },
+    ...locations.map(loc => ({
+      value: loc.location_id,
+      label: `${loc.location_id}-${loc.location_name}`
+    }))
+  ], [locations]);
 
-  // Handle form submission
+  // Modal location options (without "All")
+  const modalLocationAutocompleteOptions = useMemo(() =>
+    locations.map(loc => ({
+      value: loc.location_id,
+      label: `${loc.location_id}-${loc.location_name}`
+    }))
+  , [locations]);
+
+  // Month options with "All Months"
+  const monthAutocompleteOptions = useMemo(() => [
+    { value: '', label: 'All Months' },
+    ...allMonthOptions
+  ], [allMonthOptions]);
+
+  // Modal month options (without "All")
+  const modalMonthAutocompleteOptions = useMemo(() => allMonthOptions, [allMonthOptions]);
+
+  // Filter location autocomplete
+  const updateLocationText = useCallback((value) => {
+    setLocationInputValue(value);
+
+    if (value === '') {
+      setLocationOptions(locationAutocompleteOptions);
+    } else {
+      const filterRegex = new RegExp(value, 'i');
+      const resultOptions = locationAutocompleteOptions.filter((option) =>
+        option.label.match(filterRegex)
+      );
+      setLocationOptions(resultOptions);
+    }
+  }, [locationAutocompleteOptions]);
+
+  const updateLocationSelection = useCallback((selected) => {
+    if (selected.length === 0) {
+      setSelectedLocationOptions([]);
+      return;
+    }
+
+    const matchedOption = locationAutocompleteOptions.find((option) => option.value === selected[0]);
+
+    setSelectedLocationOptions(selected);
+    setLocationInputValue(matchedOption?.label || '');
+
+    // Update URL params and trigger server fetch
+    const newParams = new URLSearchParams(searchParams);
+    if (selected[0]) {
+      newParams.set('locationId', selected[0]);
+    } else {
+      newParams.delete('locationId');
+    }
+    setSearchParams(newParams);
+  }, [locationAutocompleteOptions, searchParams, setSearchParams]);
+
+  // Filter month autocomplete
+  const updateMonthText = useCallback((value) => {
+    setMonthInputValue(value);
+
+    if (value === '') {
+      setMonthOptions(monthAutocompleteOptions);
+    } else {
+      const filterRegex = new RegExp(value, 'i');
+      const resultOptions = monthAutocompleteOptions.filter((option) =>
+        option.label.match(filterRegex)
+      );
+      setMonthOptions(resultOptions);
+    }
+  }, [monthAutocompleteOptions]);
+
+  const updateMonthSelection = useCallback((selected) => {
+    if (selected.length === 0) {
+      setSelectedMonthOptions([]);
+      return;
+    }
+
+    const matchedOption = monthAutocompleteOptions.find((option) => option.value === selected[0]);
+
+    setSelectedMonthOptions(selected);
+    setMonthInputValue(matchedOption?.label || '');
+
+    // Update URL params and trigger server fetch
+    const newParams = new URLSearchParams(searchParams);
+    if (selected[0]) {
+      newParams.set('censusMonth', selected[0]);
+    } else {
+      newParams.delete('censusMonth');
+    }
+    setSearchParams(newParams);
+  }, [monthAutocompleteOptions, searchParams, setSearchParams]);
+
+  // Modal location autocomplete
+  const updateModalLocationText = useCallback((value) => {
+    setModalLocationInputValue(value);
+
+    if (value === '') {
+      setModalLocationOptions(modalLocationAutocompleteOptions);
+    } else {
+      const filterRegex = new RegExp(value, 'i');
+      const resultOptions = modalLocationAutocompleteOptions.filter((option) =>
+        option.label.match(filterRegex)
+      );
+      setModalLocationOptions(resultOptions);
+    }
+  }, [modalLocationAutocompleteOptions]);
+
+  const updateModalLocationSelection = useCallback((selected) => {
+    if (selected.length === 0) {
+      setFormData(prev => ({ ...prev, locationId: '' }));
+      return;
+    }
+
+    const matchedOption = modalLocationAutocompleteOptions.find((option) => option.value === selected[0]);
+
+    setModalLocationInputValue(matchedOption?.label || '');
+    setFormData(prev => ({ ...prev, locationId: selected[0] || '' }));
+  }, [modalLocationAutocompleteOptions]);
+
+  // Modal month autocomplete
+  const updateModalMonthText = useCallback((value) => {
+    setModalMonthInputValue(value);
+
+    if (value === '') {
+      setModalMonthOptions(modalMonthAutocompleteOptions);
+    } else {
+      const filterRegex = new RegExp(value, 'i');
+      const resultOptions = modalMonthAutocompleteOptions.filter((option) =>
+        option.label.match(filterRegex)
+      );
+      setModalMonthOptions(resultOptions);
+    }
+  }, [modalMonthAutocompleteOptions]);
+
+  const updateModalMonthSelection = useCallback((selected) => {
+    if (selected.length === 0) {
+      setFormData(prev => ({ ...prev, censusMonth: '' }));
+      return;
+    }
+
+    const matchedOption = modalMonthAutocompleteOptions.find((option) => option.value === selected[0]);
+
+    setModalMonthInputValue(matchedOption?.label || '');
+    setFormData(prev => ({ ...prev, censusMonth: selected[0] || '' }));
+  }, [modalMonthAutocompleteOptions]);
+
+  // Initialize options
+  useEffect(() => {
+    setLocationOptions(locationAutocompleteOptions);
+    setModalLocationOptions(modalLocationAutocompleteOptions);
+  }, [locations]);
+
+  useEffect(() => {
+    setMonthOptions(monthAutocompleteOptions);
+    setModalMonthOptions(modalMonthAutocompleteOptions);
+  }, []);
+
+  // Update modal autocomplete when editing
+  useEffect(() => {
+    if (editingRecord) {
+      const locationOption = locations.find(loc => loc.location_id === editingRecord.location_id);
+      if (locationOption) {
+        setModalLocationInputValue(`${locationOption.location_id}-${locationOption.location_name}`);
+      }
+
+      const monthOption = allMonthOptions.find(opt => opt.value === editingRecord.census_month);
+      if (monthOption) {
+        setModalMonthInputValue(monthOption.label);
+      }
+    } else if (showModal) {
+      setModalLocationInputValue('');
+      setModalMonthInputValue('');
+    }
+  }, [editingRecord, showModal, locations, allMonthOptions]);
+
+  // Initialize filters from URL params on mount
+  useEffect(() => {
+    const locationId = searchParams.get('locationId');
+    const censusMonth = searchParams.get('censusMonth');
+
+    if (locationId) {
+      setSelectedLocationOptions([locationId]);
+      const matchedOption = locationAutocompleteOptions.find(opt => opt.value === locationId);
+      if (matchedOption) setLocationInputValue(matchedOption.label);
+    }
+
+    if (censusMonth) {
+      setSelectedMonthOptions([censusMonth]);
+      const matchedOption = monthAutocompleteOptions.find(opt => opt.value === censusMonth);
+      if (matchedOption) setMonthInputValue(matchedOption.label);
+    }
+  }, []); // Run only on mount
+
   const handleSubmit = useCallback(() => {
     const submitData = new FormData();
     submitData.append("actionType", editingRecord ? "update" : "create");
@@ -168,7 +375,6 @@ export default function LocationCensusManagement() {
     submit(submitData, { method: "post" });
   }, [formData, editingRecord, submit]);
 
-  // Handle edit
   const handleEdit = useCallback((record) => {
     setEditingRecord(record);
     setFormData({
@@ -179,7 +385,6 @@ export default function LocationCensusManagement() {
     setShowModal(true);
   }, []);
 
-  // Handle delete
   const handleDelete = useCallback((record) => {
     if (confirm(`Delete census data for ${record.location_id} in ${record.census_month}?`)) {
       const submitData = new FormData();
@@ -190,7 +395,6 @@ export default function LocationCensusManagement() {
     }
   }, [submit]);
 
-  // Handle add new
   const handleAddNew = () => {
     setEditingRecord(null);
     setFormData({
@@ -201,7 +405,6 @@ export default function LocationCensusManagement() {
     setShowModal(true);
   };
 
-  // Close modal
   const closeModal = () => {
     setShowModal(false);
     setEditingRecord(null);
@@ -210,26 +413,24 @@ export default function LocationCensusManagement() {
       censusMonth: "",
       censusAmount: ""
     });
+    setModalLocationInputValue('');
+    setModalMonthInputValue('');
   };
 
-  // Handle action completion
   useEffect(() => {
     if (actionData?.success) {
       closeModal();
-      window.location.reload(); // Refresh to show updated data
+      window.location.reload();
     }
   }, [actionData]);
 
-  // Handle filter changes
-  const handleFilterChange = useCallback((type, value) => {
-    const url = new URL(window.location);
-    if (value) {
-      url.searchParams.set(type, value);
-    } else {
-      url.searchParams.delete(type);
-    }
-    window.location.href = url.toString();
-  }, []);
+  const clearFilters = () => {
+    setLocationInputValue('');
+    setSelectedLocationOptions([]);
+    setMonthInputValue('');
+    setSelectedMonthOptions([]);
+    setSearchParams(new URLSearchParams()); // Clear URL params and trigger server fetch
+  };
 
   // Prepare table rows
   const tableRows = censusRecords.map(record => {
@@ -237,14 +438,11 @@ export default function LocationCensusManagement() {
     const locationDisplay = locationInfo 
       ? `${record.location_id}-${locationInfo.location_name}` 
       : record.location_id;
-      
-      console.log('Record:', record);
 
     return [
       `$${parseFloat(record.census_amount).toFixed(2)}`,
       locationDisplay,
-      //show MM-YY only 
-      new Date(record.year_number, record.month_number - 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' } ),
+      new Date(record.year_number, record.month_number - 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
       <InlineStack key={record.id} gap="200">
         <Button size="slim" onClick={() => handleEdit(record)}>
           Edit
@@ -274,46 +472,59 @@ export default function LocationCensusManagement() {
 
                 {/* Filters */}
                 <InlineStack gap="300" align="end">
-                  <Select
-                    label="Filter by Location"
-                    options={[
-                      { label: "All Locations", value: "" },
-                      ...locations.map(loc => {
-                        return {
-                          label: `${loc.location_id}-${loc.location_name}`,
-                          value: loc.location_id
-                        };
-                      })
-                    ]}
-                    value={selectedLocation}
-                    onChange={(value) => handleFilterChange("location", value)}
-                  />
-                  <Select
-                    label="Filter by Month"
-                    options={[{ label: "All Months", value: "" }, ...monthOptions]}
-                    value={selectedMonth}
-                    onChange={(value) => handleFilterChange("month", value)}
-                  />
-                  {(selectedLocation || selectedMonth) && (
-                    <Button 
-                      onClick={() => {
-                        const url = new URL(window.location);
-                        url.searchParams.delete("location");
-                        url.searchParams.delete("month");
-                        window.location.href = url.toString();
-                      }}
-                      variant="tertiary"
-                    >
+                  <div style={{minWidth: '200px'}}>
+                    <Autocomplete
+                      allowMultiple={false}
+                      options={locationOptions}
+                      selected={selectedLocationOptions}
+                      onSelect={updateLocationSelection}
+                      textField={
+                        <Autocomplete.TextField
+                          onChange={updateLocationText}
+                          label="Filter by Location"
+                          value={locationInputValue}
+                          prefix={<Icon source={SearchIcon} tone="base" />}
+                          placeholder="Search locations..."
+                          autoComplete="off"
+                        />
+                      }
+                    />
+                  </div>
+                  <div style={{minWidth: '200px'}}>
+                    <Autocomplete
+                      allowMultiple={false}
+                      options={monthOptions}
+                      selected={selectedMonthOptions}
+                      onSelect={updateMonthSelection}
+                      textField={
+                        <Autocomplete.TextField
+                          onChange={updateMonthText}
+                          label="Filter by Month"
+                          value={monthInputValue}
+                          prefix={<Icon source={SearchIcon} tone="base" />}
+                          placeholder="Search months..."
+                          autoComplete="off"
+                        />
+                      }
+                    />
+                  </div>
+                  {(selectedLocationOptions.length > 0 || selectedMonthOptions.length > 0) && (
+                    <Button onClick={clearFilters} variant="tertiary">
                       Clear Filters
                     </Button>
                   )}
                 </InlineStack>
 
-                {censusRecords.length > 0 ? (
+                {navigation.state === "loading" ? (
+                  <BlockStack align="center" gap="400">
+                    <Spinner size="large" />
+                    <Text variant="bodyMd" tone="subdued">Loading census records...</Text>
+                  </BlockStack>
+                ) : censusRecords.length > 0 ? (
                   <DataTable
-                    columnContentTypes={[ "text", "text", "text",  "text"]}
+                    columnContentTypes={["text", "text", "text", "text"]}
                     headings={[
-                      "Census Total", 
+                      "Census Total",
                       "Location ID & Name",
                       "Month",
                       "Actions"
@@ -323,11 +534,13 @@ export default function LocationCensusManagement() {
                 ) : (
                   <BlockStack align="center" gap="300">
                     <Text variant="headingMd" alignment="center">
-                      {selectedLocation || selectedMonth ? "No records found for selected filters" : "No census records found"}
+                      {selectedLocationOptions.length > 0 || selectedMonthOptions.length > 0
+                        ? "No records found for selected filters"
+                        : "No census records found"}
                     </Text>
                     <Text alignment="center" tone="subdued">
-                      {selectedLocation || selectedMonth 
-                        ? "Try adjusting your filters or add a new census record." 
+                      {selectedLocationOptions.length > 0 || selectedMonthOptions.length > 0
+                        ? "Try adjusting your filters or add a new census record."
                         : "Add your first census record to get started."
                       }
                     </Text>
@@ -360,28 +573,40 @@ export default function LocationCensusManagement() {
         >
           <Modal.Section>
             <FormLayout>
-              <Select
-                label="Location"
-                options={[
-                  { label: "Select Location", value: "" }, 
-                  ...locations.map(loc => {
-                    return {
-                      label: `${loc.location_id}-${loc.location_name}`,
-                      value: loc.location_id
-                    };
-                  })
-                ]}
-                value={formData.locationId}
-                onChange={(value) => setFormData(prev => ({ ...prev, locationId: value }))}
-                disabled={!!editingRecord}
+              <Autocomplete
+                allowMultiple={false}
+                options={modalLocationOptions}
+                selected={formData.locationId ? [formData.locationId] : []}
+                onSelect={updateModalLocationSelection}
+                textField={
+                  <Autocomplete.TextField
+                    onChange={updateModalLocationText}
+                    label="Location"
+                    value={modalLocationInputValue}
+                    prefix={<Icon source={SearchIcon} tone="base" />}
+                    placeholder="Search and select location..."
+                    autoComplete="off"
+                    disabled={!!editingRecord}
+                  />
+                }
               />
 
-              <Select
-                label="Month"
-                options={[{ label: "Select Month", value: "" }, ...monthOptions]}
-                value={formData.censusMonth}
-                onChange={(value) => setFormData(prev => ({ ...prev, censusMonth: value }))}
-                disabled={!!editingRecord}
+              <Autocomplete
+                allowMultiple={false}
+                options={modalMonthOptions}
+                selected={formData.censusMonth ? [formData.censusMonth] : []}
+                onSelect={updateModalMonthSelection}
+                textField={
+                  <Autocomplete.TextField
+                    onChange={updateModalMonthText}
+                    label="Month"
+                    value={modalMonthInputValue}
+                    prefix={<Icon source={SearchIcon} tone="base" />}
+                    placeholder="Search and select month..."
+                    autoComplete="off"
+                    disabled={!!editingRecord}
+                  />
+                }
               />
 
               <TextField

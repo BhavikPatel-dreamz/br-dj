@@ -770,10 +770,42 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       LEFT JOIN RefundStats rs ON os.order_id = rs.order_id AND os.category_name = rs.category_name
     `;
 
-    // Execute both queries
-    const [productResults, summaryResult] = await Promise.all([
+    // Query to fetch ALL products grouped by category (not just ordered products)
+    const allProductsByCategoryQuery = `
+      SELECT 
+        COALESCE(p.shopify_category, 'Uncategorized') as category_name,
+        p.id as product_id,
+        p.title as product_name,
+        p.vendor,
+        p.product_type,
+        p.status,
+        p.handle,
+        p.tags,
+        COUNT(pv.id) as variant_count,
+        STRING_AGG(pv.sku, ', ') as all_skus,
+        AVG(CAST(pv.price AS DECIMAL(10,2))) as average_price,
+        MIN(CAST(pv.price AS DECIMAL(10,2))) as min_price,
+        MAX(CAST(pv.price AS DECIMAL(10,2))) as max_price
+      FROM brdjdb.shopify.product p
+      LEFT JOIN brdjdb.shopify.product_variant pv ON p.id = pv.product_id
+      WHERE p.status = 'active'
+      GROUP BY 
+        p.id,
+        COALESCE(p.shopify_category, 'Uncategorized'),
+        p.title,
+        p.vendor,
+        p.product_type,
+        p.status,
+        p.handle,
+        p.tags
+      ORDER BY category_name, p.title
+    `;
+
+    // Execute all three queries
+    const [productResults, summaryResult, allProductsResults] = await Promise.all([
       mssql.query(query, params),
-      mssql.query(categorySummaryQuery, params)
+      mssql.query(categorySummaryQuery, params),
+      mssql.query(allProductsByCategoryQuery, {})
     ]);
 
     // Group products by category
@@ -834,7 +866,52 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       }
     });
 
+    // Group ALL products by category (not just ordered products)
+    const allProductsByCategory = {};
+    allProductsResults.forEach(product => {
+      const categoryName = decodeHtmlEntities(product.category_name || 'Uncategorized');
+      
+      if (!allProductsByCategory[categoryName]) {
+        allProductsByCategory[categoryName] = {
+          category_name: categoryName,
+          products: [],
+          total_products: 0,
+          budget: budgetMap[categoryName] || 0
+        };
+      }
+      
+      allProductsByCategory[categoryName].products.push({
+        product_id: product.product_id,
+        product_name: product.product_name,
+        vendor: product.vendor,
+        product_type: product.product_type,
+        status: product.status,
+        handle: product.handle,
+        tags: product.tags,
+        variant_count: product.variant_count,
+        all_skus: product.all_skus,
+        average_price: product.average_price,
+        min_price: product.min_price,
+        max_price: product.max_price
+      });
+      
+      allProductsByCategory[categoryName].total_products += 1;
+    });
+
+    // Add budget categories that have no products
+    Object.keys(budgetMap).forEach(budgetCategoryName => {
+      if (!allProductsByCategory[budgetCategoryName]) {
+        allProductsByCategory[budgetCategoryName] = {
+          category_name: budgetCategoryName,
+          products: [],
+          total_products: 0,
+          budget: budgetMap[budgetCategoryName]
+        };
+      }
+    });
+
     const categories = Object.values(categorizedData);
+    const allProductsByCategoryArray = Object.values(allProductsByCategory);
     const summary = summaryResult[0] || { 
       total_orders: 0, 
       orders_with_refunds: 0,
@@ -846,6 +923,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
 
     return {
       categories,
+      allProductsByCategory: allProductsByCategoryArray, // New key for ALL products grouped by category
       totalOrders: summary.total_orders || 0,
       ordersWithRefunds: summary.orders_with_refunds || 0,
       totalCategories: summary.total_categories || 0,
