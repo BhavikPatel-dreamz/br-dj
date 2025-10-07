@@ -418,34 +418,41 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       WITH OrderedProducts AS (
         SELECT 
           COALESCE(p.shopify_category, 'Uncategorized') as category_name,
-          ol.id as order_line_id,
           ol.product_id,
           ol.variant_id,
-          ol.name as product_name,
-          ol.sku,
-          ol.vendor,
-          ol.quantity as ordered_quantity,
-          CAST(ol.price AS DECIMAL(10,2)) as unit_price,
-          CAST(ol.price AS DECIMAL(10,2)) * ol.quantity as ordered_value,
-          o.id as order_id,
-          o.order_budget_month,
-          o.created_at
+          MAX(ol.name) as product_name,
+          MAX(ol.sku) as sku,
+          MAX(ol.vendor) as vendor,
+          SUM(ol.quantity) as ordered_quantity,
+          AVG(CAST(ol.price AS DECIMAL(10,2))) as unit_price,
+          SUM(CAST(ol.price AS DECIMAL(10,2)) * ol.quantity) as ordered_value,
+          STRING_AGG(CAST(ol.id AS VARCHAR), ',') as order_line_ids,
+          STRING_AGG(CAST(o.id AS VARCHAR), ',') as order_ids,
+          MAX(o.order_budget_month) as order_budget_month,
+          MAX(o.created_at) as created_at
         FROM brdjdb.shopify.[order] AS o
         INNER JOIN brdjdb.shopify.order_line AS ol ON o.id = ol.order_id
         LEFT JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
         ${whereClause}
+        GROUP BY 
+          COALESCE(p.shopify_category, 'Uncategorized'),
+          ol.product_id,
+          ol.variant_id
       ),
       RefundedProducts AS (
         -- Get all refunded products for orders from the same budget period (refunds can be from any date)
         SELECT 
-          olr.order_line_id,
+          ol.product_id,
+          ol.variant_id,
           SUM(olr.quantity) as total_refunded_quantity,
           SUM(olr.subtotal) as total_refunded_value
         FROM brdjdb.shopify.order_line_refund AS olr
         INNER JOIN brdjdb.shopify.refund AS r ON olr.refund_id = r.id
         INNER JOIN brdjdb.shopify.[order] AS o ON r.order_id = o.id
-        INNER JOIN OrderedProducts op ON olr.order_line_id = op.order_line_id
-        GROUP BY olr.order_line_id
+        INNER JOIN brdjdb.shopify.order_line AS ol ON olr.order_line_id = ol.id
+        INNER JOIN brdjdb.shopify.product AS p ON ol.product_id = p.id
+        ${whereClause}
+        GROUP BY ol.product_id, ol.variant_id
       ),
       ProductSummary AS (
         SELECT 
@@ -455,23 +462,16 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
           op.product_name,
           op.sku,
           op.vendor,
-          SUM(op.ordered_quantity) as gross_quantity,
-          SUM(COALESCE(rp.total_refunded_quantity, 0)) as refunded_quantity,
-          SUM(op.ordered_quantity - COALESCE(rp.total_refunded_quantity, 0)) as net_quantity,
-          SUM(op.ordered_value) as gross_value,
-          SUM(COALESCE(rp.total_refunded_value, 0)) as refunded_value,
-          SUM(op.ordered_value - COALESCE(rp.total_refunded_value, 0)) as net_value,
-          AVG(op.unit_price) as average_price,
-          COUNT(DISTINCT op.order_id) as order_count
+          op.ordered_quantity as gross_quantity,
+          COALESCE(rp.total_refunded_quantity, 0) as refunded_quantity,
+          op.ordered_quantity - COALESCE(rp.total_refunded_quantity, 0) as net_quantity,
+          op.ordered_value as gross_value,
+          COALESCE(rp.total_refunded_value, 0) as refunded_value,
+          op.ordered_value - COALESCE(rp.total_refunded_value, 0) as net_value,
+          op.unit_price as average_price,
+          (LEN(op.order_ids) - LEN(REPLACE(op.order_ids, ',', '')) + 1) as order_count
         FROM OrderedProducts op
-        LEFT JOIN RefundedProducts rp ON op.order_line_id = rp.order_line_id
-        GROUP BY 
-          op.category_name,
-          op.product_id,
-          op.variant_id,
-          op.product_name,
-          op.sku,
-          op.vendor
+        LEFT JOIN RefundedProducts rp ON op.product_id = rp.product_id AND op.variant_id = rp.variant_id
       )
       SELECT 
         category_name,
