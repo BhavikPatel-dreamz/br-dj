@@ -4,33 +4,56 @@ import mssql from "../app/mssql.server.js";
 
 const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
 const ADMIN_API_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN;
-const BATCH_SIZE = 100; // Process 100 products at a time
-const MAX_BATCHES = 50; // Maximum 5000 products
+const BATCH_SIZE = 250; // Process 250 products at a time
+const MAX_BATCHES = 100; // Maximum 5000 products
 
 // Get specific product ID from command line argument
 const SPECIFIC_PRODUCT_ID = process.argv[2]; // node script.js 7897897987
 
+// const PRODUCTS_WITH_METAFIELDS_QUERY = `
+//   query getProductsWithMetafields($first: Int!, $after: String) {
+//     products(first: $first, after: $after) {
+//       edges {
+//         node {
+//           id
+//           title
+//           handle
+//           productType
+//           vendor
+//           status
+//           metafields(first: 50) {
+//             edges {
+//               node {
+//                 id
+//                 key
+//                 namespace
+//                 value
+//                 type
+//               }
+//             }
+//           }
+//         }
+//       }
+//       pageInfo {
+//         hasNextPage
+//         endCursor
+//       }
+//     }
+//   }
+// `;
+
 const PRODUCTS_WITH_METAFIELDS_QUERY = `
-  query getProductsWithMetafields($first: Int!, $after: String) {
+  query getProductsWithGLCode($first: Int!, $after: String) {
     products(first: $first, after: $after) {
       edges {
         node {
           id
-          title
-          handle
-          productType
-          vendor
-          status
-          metafields(first: 50) {
-            edges {
-              node {
-                id
-                key
-                namespace
-                value
-                type
-              }
-            }
+          metafield(namespace: "custom", key: "gl_code_name") {
+            id
+            key
+            namespace
+            value
+            type
           }
         }
       }
@@ -158,35 +181,44 @@ async function fetchProductBatch(cursor = null) {
     after: cursor
   });
 
+  
+
+
   const products = data.products.edges.map(edge => edge.node);
   const glCodeProducts = [];
 
+ 
   products.forEach(product => {
-    product.metafields.edges.forEach(metafieldEdge => {
-      const metafield = metafieldEdge.node;
-      const keyLower = metafield.key.toLowerCase();
-      const namespaceLower = metafield.namespace.toLowerCase();
 
-      // Check if this is a GL code metafield
-      if (
-        (keyLower.includes('apex') && (keyLower.includes('gl') || keyLower.includes('code'))) ||
-        keyLower === 'gl_code' ||
-        keyLower === 'gl_code_name' ||
-        keyLower === 'apex_gl_code' ||
-        namespaceLower.includes('apex') ||
-        (keyLower.includes('gl') && keyLower.includes('code'))
-      ) {
-        glCodeProducts.push({
-          productId: product.id.replace('gid://shopify/Product/', ''),
-          productTitle: product.title,
-          productType: product.productType,
-          vendor: product.vendor,
-          metafieldValue: metafield.value,
-          metafieldKey: metafield.key,
-          metafieldNamespace: metafield.namespace
-        });
-      }
-    });
+    // product.metafields.edges.forEach(metafieldEdge => {
+    //   const metafield = metafieldEdge.node;
+    //   const keyLower = metafield.key.toLowerCase();
+    //   const namespaceLower = metafield.namespace.toLowerCase();
+
+      const metafield = product.metafield;
+      // console.log( "meta ",metafield)
+       if(metafield)
+       {
+            // Check if this is a GL code metafield
+            // if (
+            //   (keyLower.includes('apex') && (keyLower.includes('gl') || keyLower.includes('code'))) ||
+              //   keyLower === 'gl_code' ||
+          //   keyLower === 'gl_code_name' ||
+          //   keyLower === 'apex_gl_code' ||
+          //   namespaceLower.includes('apex') ||
+          //   (keyLower.includes('gl') && keyLower.includes('code'))
+          // ) {
+            glCodeProducts.push({
+              productId: product.id.replace('gid://shopify/Product/', ''),
+              // productTitle: product.title,
+              // productType: product.productType,
+              // vendor: product.vendor,
+              metafieldValue: metafield.value || '',
+              metafieldKey: metafield.key || '',
+              metafieldNamespace: metafield.namespace || ''
+            });
+       }
+   // });
   });
 
   return {
@@ -197,83 +229,48 @@ async function fetchProductBatch(cursor = null) {
   };
 }
 
-// BULK UPDATE - Much faster than individual updates (FIXED TEMP TABLE ISSUE)
+// BULK UPDATE - Process multiple products efficiently using batched parameterized queries
 async function bulkUpdateProductCategories(productsToUpdate) {
   if (productsToUpdate.length === 0) {
     return { success: true, updated: 0 };
   }
 
+
+  console.log('\n📝 Performing bulk update of product categories...', productsToUpdate);
+
   try {
     console.log(`   💾 Bulk updating ${productsToUpdate.length} products...`);
 
-    // Use table variable instead of temp table (more reliable)
-    const updatePromises = [];
-    
-    // For small batches, use individual parameterized queries (safer)
-    if (productsToUpdate.length <= 10) {
-      for (const product of productsToUpdate) {
-        const query = `
-          UPDATE shopify.product
-          SET shopify_category = @category,
-              updated_at = GETDATE()
-          WHERE id = @productId
-        `;
-        
-        updatePromises.push(
-          mssql.query(query, {
-            category: product.category,
-            productId: product.productId
-          }).catch(err => {
-            console.warn(`   ⚠️  Failed to update product ${product.productId}`);
-            return null;
-          })
-        );
-      }
+    // Process all updates in parallel using parameterized queries (SAFE & FAST)
+    const updatePromises = productsToUpdate.map(product => {
+      const query = `
+        UPDATE shopify.product
+        SET shopify_category = @category,
+            updated_at = GETDATE()
+        WHERE id = @productId
+      `;
       
-      const results = await Promise.all(updatePromises);
-      const updatedCount = results.filter(r => r !== null).length;
-      console.log(`   ✅ Update complete: ${updatedCount} products updated`);
-      return { success: true, updated: updatedCount };
-    }
-
-    // For larger batches, use dynamic SQL (faster but needs sanitization)
-    const caseStatements = productsToUpdate.map(p => {
-      const sanitizedCategory = p.category.replace(/'/g, "''");
-      return `WHEN ${p.productId} THEN '${sanitizedCategory}'`;
-    }).join('\n        ');
-
-    const productIds = productsToUpdate.map(p => p.productId).join(',');
-
-    const bulkQuery = `
-      UPDATE shopify.product
-      SET shopify_category = CASE id
-        ${caseStatements}
-      END,
-      updated_at = GETDATE()
-      WHERE id IN (${productIds});
-      
-      SELECT @@ROWCOUNT as updated_count;
-    `;
-
-    const result = await mssql.query(bulkQuery);
+      return mssql.query(query, {
+        category: product.category,
+        productId: product.productId
+      }).catch(err => {
+        console.warn(`   ⚠️  Failed to update product ${product.productId}: ${err.message}`);
+        return null;
+      });
+    });
     
-    // Get the count from the result
-    let updatedCount = productsToUpdate.length; // Default to expected count
+    // Wait for all updates to complete
+    const results = await Promise.all(updatePromises);
+    const updatedCount = results.filter(r => r !== null).length;
     
-    if (Array.isArray(result) && result.length > 0) {
-      updatedCount = result[0].updated_count || productsToUpdate.length;
-    } else if (result && result.rowsAffected) {
-      updatedCount = result.rowsAffected[0] || productsToUpdate.length;
-    }
-    
-    console.log(`   ✅ Bulk update complete: ${updatedCount} products updated`);
+    console.log(`   ✅ Bulk update complete: ${updatedCount}/${productsToUpdate.length} products updated`);
     return { success: true, updated: updatedCount };
 
   } catch (error) {
     console.error('   ❌ Bulk update failed:', error.message);
     
-    // Fallback to individual updates if bulk fails
-    console.log('   🔄 Falling back to individual updates...');
+    // Fallback to sequential updates if bulk fails
+    console.log('   🔄 Falling back to sequential updates...');
     let updatedCount = 0;
     
     for (const product of productsToUpdate) {
@@ -289,11 +286,11 @@ async function bulkUpdateProductCategories(productsToUpdate) {
         });
         updatedCount++;
       } catch (err) {
-        console.warn(`   ⚠️  Failed to update product ${product.productId}`);
+        console.warn(`   ⚠️  Failed to update product ${product.productId}: ${err.message}`);
       }
     }
     
-    console.log(`   ✅ Fallback complete: ${updatedCount} products updated`);
+    console.log(`   ✅ Fallback complete: ${updatedCount}/${productsToUpdate.length} products updated`);
     return { success: true, updated: updatedCount };
   }
 }
@@ -427,10 +424,8 @@ async function processProductsInBatches() {
         // Prepare products for bulk update
         const productsToUpdate = batchResult.products.map(item => ({
           productId: item.productId,
-          category: item.metafieldKey === 'gl_code_name' 
-            ? item.metafieldValue 
-            : `GL-${item.metafieldValue}`,
-          title: item.productTitle
+          category: item.metafieldValue,
+         // title: item.productTitle
         }));
 
         const updateResult = await bulkUpdateProductCategories(productsToUpdate);

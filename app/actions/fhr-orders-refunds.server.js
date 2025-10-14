@@ -60,7 +60,7 @@ function decodeHtmlEntities(str) {
 async function getBudgetDataForLocation(locationId, budgetMonth = null) {
   try {
     // If budgetMonth is provided, calculate budget using census data
-    console.log("Fetching budget data for location:", locationId, "and budgetMonth:", budgetMonth);
+    
     if (budgetMonth && locationId) {
       return await calculateBudgetFromCensus(locationId, budgetMonth);
     }
@@ -401,7 +401,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       const locationForBudget = filters.locationId || filters.companyLocationId;
       // Use filters.budgetMonth directly instead of constructing from month/year
      
-      console.log("Fetching budget for location:", locationForBudget, "and budgetMonth:", budgetMonth);
+      //console.log("Fetching budget for location:", locationForBudget, "and budgetMonth:", budgetMonth);
       budgetMap = await getBudgetDataForLocation(locationForBudget, budgetMonth);
       //console.log("Budget Map Result:", Object.keys(budgetMap).length > 0 ? Object.keys(budgetMap) : "Empty budget map");
     }
@@ -546,19 +546,22 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       ORDER BY category_name, p.title
     `;
 
+
+   
+
     // Execute all queries including test query
     const [productResults, summaryResult, allProductsResults] = await Promise.all([
       mssql.query(query, params),
       mssql.query(categorySummaryQuery, params),
       mssql.query(allProductsByCategoryQuery, {})
     ]);
-
+ console.log("Executing main query with params:", productResults);
    
 
-    console.log("Product Results Count:", productResults.length);
-    console.log("Summary Result:", summaryResult);
-    console.log("All Products Results Count:", allProductsResults.length);
-    console.log("Budget Map:", budgetMap);
+    // console.log("Product Results Count:", productResults.length);
+    // console.log("Summary Result:", summaryResult);
+    // console.log("All Products Results Count:", allProductsResults.length);
+    // console.log("Budget Map:", budgetMap);
   
 
     // Group products by category - ONLY include categories that are assigned in budget_category table
