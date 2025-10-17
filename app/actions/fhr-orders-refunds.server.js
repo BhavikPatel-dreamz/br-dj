@@ -62,7 +62,8 @@ async function getBudgetDataForLocation(locationId, budgetMonth = null) {
     // If budgetMonth is provided, calculate budget using census data
     
     if (budgetMonth && locationId) {
-      return await calculateBudgetFromCensus(locationId, budgetMonth);
+      const budgetResult = await calculateBudgetFromCensus(locationId, budgetMonth);
+      return budgetResult.budgetMap || budgetResult; // Handle both old and new return formats
     }
     
     // Fallback to static budget data if no budget month provided
@@ -151,6 +152,7 @@ async function calculateBudgetFromCensus(locationId, budgetMonth) {
     // Calculate budget for each category using the formula:
     // BUDGET OF CATEGORY = CENSUS OF LOCATION × DAYS OF THE CURRENT MONTH × PPD
     const budgetMap = {};
+    const budgetDetails = {};
     //console.log(categoriesData)
     
     categoriesData.forEach(category => {
@@ -163,13 +165,32 @@ async function calculateBudgetFromCensus(locationId, budgetMonth) {
       budgetMap[decodedCategoryName] = calculatedBudget;
       // Also store the original in case it's needed
       budgetMap[category.category_name] = calculatedBudget;
+      
+      // Store detailed calculation info
+      budgetDetails[decodedCategoryName] = {
+        censusAmount: censusAmount,
+        daysInMonth: daysInMonth,
+        ppdRate: ppdRate,
+        calculatedBudget: calculatedBudget
+      };
+      budgetDetails[category.category_name] = {
+        censusAmount: censusAmount,
+        daysInMonth: daysInMonth,
+        ppdRate: ppdRate,
+        calculatedBudget: calculatedBudget
+      };
     });
     
     // console.log(`Budget calculation for location ${locationId}, month ${budgetMonth}:`);
     // console.log(`Census: ${censusAmount}, Days: ${daysInMonth}`);
      //console.log('Calculated budgets:', budgetMap);
     
-    return budgetMap;
+    return {
+      budgetMap,
+      budgetDetails,
+      censusAmount,
+      daysInMonth
+    };
     
   } catch (error) {
     console.error("Error calculating budget from census:", error);
@@ -397,12 +418,23 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
 
     // Get budget data for the location
     let budgetMap = {};
+    let budgetCalculationDetails = null;
     if (filters.locationId || filters.companyLocationId) {
       const locationForBudget = filters.locationId || filters.companyLocationId;
       // Use filters.budgetMonth directly instead of constructing from month/year
      
       //console.log("Fetching budget for location:", locationForBudget, "and budgetMonth:", budgetMonth);
-      budgetMap = await getBudgetDataForLocation(locationForBudget, budgetMonth);
+      const budgetResult = await calculateBudgetFromCensus(locationForBudget, budgetMonth);
+      if (budgetResult && budgetResult.budgetMap) {
+        budgetMap = budgetResult.budgetMap;
+        budgetCalculationDetails = {
+          censusAmount: budgetResult.censusAmount,
+          daysInMonth: budgetResult.daysInMonth,
+          budgetDetails: budgetResult.budgetDetails
+        };
+      } else {
+        budgetMap = budgetResult || {};
+      }
       //console.log("Budget Map Result:", Object.keys(budgetMap).length > 0 ? Object.keys(budgetMap) : "Empty budget map");
     }
 
@@ -555,7 +587,7 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       mssql.query(categorySummaryQuery, params),
       mssql.query(allProductsByCategoryQuery, {})
     ]);
- console.log("Executing main query with params:", productResults);
+ 
    
 
     // console.log("Product Results Count:", productResults.length);
@@ -584,8 +616,23 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
             refunded_quantity: 0,
             refunded_value: 0,
             budget: budgetMap[categoryName],
-            hasBudget: true
+            hasBudget: true,
+            budgetcensusAmount: budgetCalculationDetails ? budgetCalculationDetails.censusAmount : null,
+            budgetdaysInMonth: budgetCalculationDetails ? budgetCalculationDetails.daysInMonth : null,
+            budgetPPDRates: budgetCalculationDetails ? budgetCalculationDetails.budgetDetails[categoryName]?.ppdRate : null,
+            categoryTotal: 0, // Will be updated as products are added
+            ActualPPD: 0, // Will be calculated after category total is known
+            budgetCalculationDetails: budgetCalculationDetails ? budgetCalculationDetails.budgetDetails[categoryName] : null
           };
+        }
+        
+        // Calculate ActualPPD for individual product
+        const productDaysInMonth = categorizedData[categoryName].budgetdaysInMonth || 1;
+        const productCensusAmount = categorizedData[categoryName].budgetcensusAmount || 1;
+        let productActualPPD = 0;
+        
+        if (productDaysInMonth > 0 && productCensusAmount > 0) {
+          productActualPPD = (parseFloat(product.gross_value) / productCensusAmount / productDaysInMonth).toFixed(2);
         }
         
         categorizedData[categoryName].products.push({
@@ -599,7 +646,8 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
           gross_quantity: product.gross_quantity,
           refunded_quantity: product.refunded_quantity,
           gross_value: product.gross_value,
-          refunded_value: product.refunded_value
+          refunded_value: product.refunded_value,
+          ActualPPD: productActualPPD
         });
         
         categorizedData[categoryName].total_quantity += parseFloat(product.total_quantity) || 0;
@@ -608,6 +656,15 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
         categorizedData[categoryName].gross_value += parseFloat(product.gross_value) || 0;
         categorizedData[categoryName].refunded_quantity += parseFloat(product.refunded_quantity) || 0;
         categorizedData[categoryName].refunded_value += parseFloat(product.refunded_value) || 0;
+        
+        // Update category total and calculate budget based on formula: gross_value / censusAmount / daysInMonth
+        categorizedData[categoryName].categoryTotal = categorizedData[categoryName].gross_value;
+        const daysInMonth = categorizedData[categoryName].budgetdaysInMonth || 1;
+        const censusAmount = categorizedData[categoryName].budgetcensusAmount || 1;
+        
+        if (daysInMonth > 0 && censusAmount > 0) {
+          categorizedData[categoryName].ActualPPD = (categorizedData[categoryName].gross_value / censusAmount / daysInMonth).toFixed(2);
+        }
       } 
     });
 
@@ -624,7 +681,13 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
           refunded_quantity: 0,
           refunded_value: 0,
           budget: budgetMap[budgetCategoryName],
-          hasBudget: true
+          hasBudget: true,
+          budgetcensusAmount: budgetCalculationDetails ? budgetCalculationDetails.censusAmount : null,
+          budgetdaysInMonth: budgetCalculationDetails ? budgetCalculationDetails.daysInMonth : null,
+          budgetPPDRates: budgetCalculationDetails ? budgetCalculationDetails.budgetDetails[budgetCategoryName]?.ppdRate : null,
+          categoryTotal: 0,
+          ActualPPD: 0,
+          budgetCalculationDetails: budgetCalculationDetails ? budgetCalculationDetails.budgetDetails[budgetCategoryName] : null
         };
       }
     });
@@ -697,7 +760,8 @@ export async function getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth(
       refundedValue: summary.total_refunded_value || 0,
       totalValue: summary.net_value || 0, // Net value after refunds
       refundRate: summary.total_orders > 0 ? (summary.orders_with_refunds / summary.total_orders * 100) : 0,
-      budgetMonth: filters.budgetMonth // Return the budget month used for filtering
+      budgetMonth: budgetMonth, // Return the budget month used for filtering
+      budgetCalculationDetails: budgetCalculationDetails // Return census amount, days in month, and PPD rates
     };
 
   } catch (error) {
