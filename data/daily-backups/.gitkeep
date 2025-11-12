@@ -1,0 +1,2 @@
+# This file ensures the daily-backups directory is tracked by git
+# Actual JSON backup files are ignored via .gitignore

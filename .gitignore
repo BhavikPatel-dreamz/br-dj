@@ -368,3 +368,5 @@ test-connection.js.local
 
 
 test-Query/
+# Daily backup data (JSON files)
+data/daily-backups/**/*.json
