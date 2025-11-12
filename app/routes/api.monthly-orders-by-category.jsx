@@ -1,5 +1,6 @@
 import { json } from "@remix-run/node";
-
+import fs from 'fs/promises';
+import path from 'path';
 
 import {
   validateShopifyProxyRequest,
@@ -7,11 +8,166 @@ import {
 } from "../utils/shopify-security.server.js";
 import { getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth } from "../actions/index.server.js";
 
+// JSON Backup Storage Configuration
+const BACKUP_BASE_DIR = path.join(process.cwd(), 'data', 'daily-backups');
+const DAYS_TO_KEEP = 10;
+
+/**
+ * Ensure directory exists
+ */
+async function ensureDir(dirPath) {
+  try {
+    await fs.mkdir(dirPath, { recursive: true });
+  } catch (error) {
+    console.error(`Error creating directory ${dirPath}:`, error);
+  }
+}
+
+/**
+ * Get file path for backup JSON
+ * @param {string} todayDate - Today's date in YYYY-MM-DD format (when backup is created)
+ * @param {string} locationId - Location ID
+ * @param {string} searchMonth - Search month (MM)
+ * @param {string} searchYear - Search year (YYYY)
+ * @returns {object} Directory path and file path
+ */
+function getBackupFilePath(todayDate, locationId, searchMonth, searchYear) {
+  const monthYear = `${searchMonth}-${searchYear}`;
+  const dirPath = path.join(BACKUP_BASE_DIR, locationId, monthYear);
+  const fileName = `${todayDate}.json`;
+  return { dirPath, filePath: path.join(dirPath, fileName) };
+}
+
+/**
+ * Check if backup file exists for a specific date and location
+ * @param {string} todayDate - Today's date in YYYY-MM-DD format
+ * @param {string} locationId - Location ID
+ * @param {string} searchMonth - Search month (MM)
+ * @param {string} searchYear - Search year (YYYY)
+ * @returns {Promise<boolean>} True if file exists
+ */
+async function backupExists(todayDate, locationId, searchMonth, searchYear) {
+  try {
+    const { filePath } = getBackupFilePath(todayDate, locationId, searchMonth, searchYear);
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Save backup JSON file
+ * @param {string} todayDate - Today's date in YYYY-MM-DD format
+ * @param {string} locationId - Location ID
+ * @param {string} searchMonth - Search month (MM)
+ * @param {string} searchYear - Search year (YYYY)
+ * @param {object} data - Data to store
+ * @returns {Promise<boolean>} Success status
+ */
+async function saveBackup(todayDate, locationId, searchMonth, searchYear, data) {
+  try {
+    const { dirPath, filePath } = getBackupFilePath(todayDate, locationId, searchMonth, searchYear);
+    
+    // Ensure directory exists
+    await ensureDir(dirPath);
+    
+    // Prepare backup data with metadata
+    const backupData = {
+      metadata: {
+        backupDate: todayDate,
+        searchMonth: searchMonth,
+        searchYear: searchYear,
+        locationId,
+        generatedAt: new Date().toISOString(),
+        dataType: 'monthly-orders-by-category'
+      },
+      ...data
+    };
+    
+    // Write file
+    await fs.writeFile(filePath, JSON.stringify(backupData, null, 2), 'utf8');
+    console.log(`✓ Backup saved: ${filePath}`);
+    return true;
+  } catch (error) {
+    console.error(`✗ Backup save failed for ${todayDate} - Location ${locationId}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Clean up old backup files (older than DAYS_TO_KEEP)
+ * Runs asynchronously without blocking the response
+ */
+async function cleanOldBackups() {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - DAYS_TO_KEEP);
+    
+    const baseExists = await fs.access(BACKUP_BASE_DIR).then(() => true).catch(() => false);
+    if (!baseExists) return;
+    
+    let deletedCount = 0;
+    const locations = await fs.readdir(BACKUP_BASE_DIR);
+    
+    // Iterate through locations
+    for (const location of locations) {
+      const locationPath = path.join(BACKUP_BASE_DIR, location);
+      const locationStat = await fs.stat(locationPath);
+      if (!locationStat.isDirectory()) continue;
+      
+      // Iterate through month-year folders (e.g., 10-2025, 11-2025)
+      const monthYears = await fs.readdir(locationPath);
+      
+      for (const monthYear of monthYears) {
+        const monthYearPath = path.join(locationPath, monthYear);
+        const monthYearStat = await fs.stat(monthYearPath);
+        if (!monthYearStat.isDirectory()) continue;
+        
+        // Iterate through backup files
+        const files = await fs.readdir(monthYearPath);
+        
+        for (const file of files) {
+          if (!file.endsWith('.json')) continue;
+          
+          const date = file.replace('.json', '');
+          const fileDate = new Date(date);
+          
+          if (fileDate < cutoffDate) {
+            const filePath = path.join(monthYearPath, file);
+            await fs.unlink(filePath);
+            deletedCount++;
+          }
+        }
+        
+        // Remove empty directories
+        const remainingFiles = await fs.readdir(monthYearPath);
+        if (remainingFiles.length === 0) {
+          await fs.rmdir(monthYearPath);
+        }
+      }
+    }
+    
+    if (deletedCount > 0) {
+      console.log(`🗑️  Cleaned ${deletedCount} old backup files (keeping last ${DAYS_TO_KEEP} days)`);
+    }
+  } catch (error) {
+    console.error('Error cleaning old backups:', error);
+  }
+}
+
 
 /**
  * Secure API Route for Monthly Order Products by Category (with Refunds)
  * Supports both authenticated Shopify users and secure proxy access
  * Returns net quantities and values after subtracting refunds
+ * 
+ * AUTOMATIC BACKUP FEATURE:
+ * - Automatically stores JSON responses in data/daily-backups/{year}/{month}/{locationId}/{date}.json
+ * - Skips storage if backup file already exists for that day and location
+ * - Maintains backups for the last 10 days (older files are automatically cleaned)
+ * - Backup operations run asynchronously and don't block the API response
+ * 
  * GET /api/monthly-orders-by-category
  *
  * Query Parameters:
@@ -26,6 +182,16 @@ import { getMonthlyOrderProductsByCategoryWithRefundsByBudgetMonth } from "../ac
  * Response includes:
  * - categories: Array of product categories with net quantities/values
  * - summary: Total orders, refund metrics, net values
+ * 
+ * Backup File Structure:
+ * data/daily-backups/
+ *   ├── 2348220643/               (Location ID)
+ *   │   ├── 10-2025/              (Search Month-Year)
+ *   │   │   ├── 2025-11-01.json  (Backup created on Nov 1)
+ *   │   │   ├── 2025-11-02.json  (Backup created on Nov 2)
+ *   │   │   └── ...
+ *   │   ├── 11-2025/
+ *   │   │   └── ...
  */
 export const loader = async ({ request }) => {
   try {
@@ -195,6 +361,41 @@ export const loader = async ({ request }) => {
         },
       },
     };
+
+    // === BACKUP STORAGE FOR LAST 10 DAYS ===
+    // Store JSON backup for location-based queries
+    const locationForBackup = locationId || companyLocationId;
+    if (locationForBackup) {
+      // Use today's date as the backup filename
+      const today = new Date();
+      const todayDate = today.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      
+      try {
+        // Check if backup already exists for today's date, this location, and search month/year
+        const exists = await backupExists(todayDate, locationForBackup, searchMonth, searchYear);
+        
+        if (!exists) {
+          // Save backup asynchronously (don't wait for it)
+          saveBackup(todayDate, locationForBackup, searchMonth, searchYear, responseData).catch(err => {
+            console.error('Backup save error (non-blocking):', err);
+          });
+          console.log(`📦 Backup queued: ${locationForBackup}/${searchMonth}-${searchYear}/${todayDate}.json`);
+        } else {
+          console.log(`⏭️  Backup already exists: ${locationForBackup}/${searchMonth}-${searchYear}/${todayDate}.json, skipping`);
+        }
+        
+        // Clean old backups asynchronously (don't wait for it)
+        // Only run cleanup occasionally (10% chance) to avoid overhead
+        if (Math.random() < 0.1) {
+          cleanOldBackups().catch(err => {
+            console.error('Cleanup error (non-blocking):', err);
+          });
+        }
+      } catch (backupError) {
+        // Log backup errors but don't fail the request
+        console.error('Backup process error (non-blocking):', backupError);
+      }
+    }
 
     // Return secure response if secure authentication was used
     if (requireSecureAuth) {

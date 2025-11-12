@@ -37,7 +37,12 @@ export const loader = async ({ request }) => {
 
     const filters = {};
     if (locationId) filters.locationId = locationId;
-    if (censusMonth) filters.censusMonth = censusMonth;
+    if (censusMonth) {
+      // Parse MM-YYYY format to separate month and year
+      const [month, year] = censusMonth.split('-');
+      filters.month = month;
+      filters.year = year;
+    }
 
     const locations = await getAvailableLocationsForCensus();
     const censusRecords = await getAllLocationCensus(filters);
